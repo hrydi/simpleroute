@@ -1,0 +1,12 @@
+services:
+  hrydi-simple-route:
+    container_name: hrydi-simple-route
+    build:
+      context: ../
+      dockerfile: ./build/Dockerfile
+      target: "build"
+    env_file: .env
+    restart: always
+    command: sleep infinity
+    volumes:
+      - ${PWD}:/home/ubuntu/apps:z
