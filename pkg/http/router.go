@@ -18,7 +18,8 @@ var METHODS []string = []string{
 }
 
 type RouterConfig struct {
-	Spa bool
+	AssetDir  string
+	AssetPath string
 }
 
 type Router interface {
@@ -161,16 +162,16 @@ func (r *routerImpl) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	patterns := strings.Split(pattern, " ")
 
 	if len(patterns) == 2 {
-		if !r.config.Spa {
-			if _, ok := matchPath(patterns[1], req.URL.Path); !ok {
-				http.Error(res, "page not found", http.StatusNotFound)
-				return
-			}
+		_, ok := r.matchPath(patterns[1], req.URL.Path)
+		if !ok {
+			http.Error(res, "page not found", http.StatusNotFound)
+			return
 		}
+
 	} else {
 		matchError := 0
 		for _, mh := range handlers {
-			_, ok := matchPath(mh.pattern, req.URL.Path)
+			_, ok := r.matchPath(mh.pattern, req.URL.Path)
 
 			if ok && mh.method != req.Method {
 				http.Error(res, "method not allowed", http.StatusMethodNotAllowed)
@@ -180,11 +181,9 @@ func (r *routerImpl) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 			matchError++
 		}
 
-		if !r.config.Spa {
-			if matchError == len(handlers) {
-				http.Error(res, "page not found", http.StatusNotFound)
-				return
-			}
+		if matchError == len(handlers) {
+			http.Error(res, "page not found", http.StatusNotFound)
+			return
 		}
 
 	}
@@ -212,6 +211,13 @@ func (r *routerImpl) Handle(method, path string, args ...any) *routerImpl {
 func (r *routerImpl) setupRoutes() (*http.ServeMux, []route) {
 	mux := http.NewServeMux()
 
+	if r.config.AssetPath != "" && r.config.AssetDir != "" {
+		fs := http.FileServer(http.Dir(r.config.AssetDir))
+		path := strings.Trim(r.config.AssetPath, "/")
+		path = fmt.Sprintf("/%s/", path)
+		r.Use(path, http.StripPrefix(path, fs))
+	}
+
 	routes := remap(r)
 
 	for _, group := range r.groups {
@@ -232,6 +238,15 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route) {
 	}
 
 	return mux, routes
+}
+
+func (r *routerImpl) matchPath(pattern, path string) (map[string]string, bool) {
+
+	if strings.Contains(pattern, r.config.AssetPath) && existsInStatic(pattern, r.config.AssetPath, r.config.AssetDir) {
+		return nil, true
+	}
+
+	return matchPath(pattern, path)
 }
 
 func NewRouter(config RouterConfig) *routerImpl {
