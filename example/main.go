@@ -28,7 +28,7 @@ func main() {
 	}())
 	router.Use(NewUser())
 	
-	go server.Start(router)
+	go server.Start(router.Build())
 
 	<-ctx.Done()
 

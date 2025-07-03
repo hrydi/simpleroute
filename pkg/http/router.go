@@ -47,11 +47,13 @@ type route struct {
 }
 
 type routerImpl struct {
-	config      RouterConfig
-	group       string
-	groups      map[string]Router
-	routes      map[string][]route
-	middlewares []MiddlewareFunc
+	config        RouterConfig
+	group         string
+	groups        map[string]Router
+	routes        map[string][]route
+	middlewares   []MiddlewareFunc
+	routeHandlers []route
+	mux           *http.ServeMux
 }
 
 // Get implements Router.
@@ -157,7 +159,14 @@ func (r *routerImpl) Use(args ...any) RouteRegister {
 // ServeHTTP implements http.Handler.
 func (r *routerImpl) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 
-	mux, handlers := r.setupRoutes()
+	if r.mux == nil || len(r.routeHandlers) <= 0 {
+		http.Error(res, "routes not initialize", http.StatusInternalServerError)
+		return
+	}
+
+	mux := r.mux
+	handlers := r.routeHandlers
+
 	_, pattern := mux.Handler(req)
 	patterns := strings.Split(pattern, " ")
 
@@ -208,7 +217,15 @@ func (r *routerImpl) Handle(method, path string, args ...any) *routerImpl {
 	return route
 }
 
+func (r *routerImpl) Build() *routerImpl {
+	mux, handlers := r.setupRoutes()
+	r.mux = mux
+	r.routeHandlers = handlers
+	return r
+}
+
 func (r *routerImpl) setupRoutes() (*http.ServeMux, []route) {
+	
 	mux := http.NewServeMux()
 
 	if r.config.AssetPath != "" && r.config.AssetDir != "" {
