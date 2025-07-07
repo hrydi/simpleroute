@@ -2,6 +2,7 @@ package http
 
 import (
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"slices"
@@ -20,6 +21,7 @@ var METHODS []string = []string{
 type RouterConfig struct {
 	AssetDir  string
 	AssetPath string
+	FS        fs.FS
 }
 
 type Router interface {
@@ -225,14 +227,23 @@ func (r *routerImpl) Build() *routerImpl {
 }
 
 func (r *routerImpl) setupRoutes() (*http.ServeMux, []route) {
-	
-	mux := http.NewServeMux()
 
+	mux := http.NewServeMux()
+	
 	if r.config.AssetPath != "" && r.config.AssetDir != "" {
-		fs := http.FileServer(http.Dir(r.config.AssetDir))
-		path := strings.Trim(r.config.AssetPath, "/")
-		path = fmt.Sprintf("/%s/", path)
-		r.Use(path, http.StripPrefix(path, fs))
+
+		var fsHandler http.Handler = http.FileServer(http.Dir(r.config.AssetDir))
+
+		if r.config.FS != nil {
+			content, err := fs.Sub(r.config.FS, r.config.AssetDir)
+			if err != nil {
+				log.Fatalf("use embedded fs, error: %v", err)
+			}
+
+			fsHandler = http.FileServer(http.FS(content))
+		}
+		
+		r.Get(r.config.AssetPath, http.StripPrefix(r.config.AssetPath, fsHandler))
 	}
 
 	routes := remap(r)
@@ -251,15 +262,17 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route) {
 		var handlers []MiddlewareFunc = make([]MiddlewareFunc, 0)
 		handlers = append(handlers, r.middlewares...)
 		handlers = append(handlers, route.middlewares...)
-		mux.Handle(fmt.Sprintf("%s %s", route.method, route.pattern), Handle(handlers, route.handler))
+		pattern := fmt.Sprintf("%s %s", route.method, route.pattern)
+
+		mux.Handle(pattern, Handle(handlers, route.handler))
 	}
 
 	return mux, routes
 }
 
 func (r *routerImpl) matchPath(pattern, path string) (map[string]string, bool) {
-
-	if strings.Contains(pattern, r.config.AssetPath) && existsInStatic(pattern, r.config.AssetPath, r.config.AssetDir) {
+	
+	if strings.Contains(pattern, r.config.AssetPath) && existsInStatic(path, r.config.AssetPath, r.config.AssetDir, r.config.FS) {
 		return nil, true
 	}
 

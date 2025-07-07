@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -65,15 +66,18 @@ func matchPath(pattern, path string) (map[string]string, bool) {
 	return params, true
 }
 
-func existsInStatic(uri_path, asset_path, asset_dir string) bool {
+func existsInStatic(uri_path, asset_path, asset_dir string, embedFS fs.FS) bool {
 
-	uri_path = strings.Trim(uri_path, asset_path)
-		
-	fullPath := filepath.Join(asset_dir, uri_path)
-
-	info, err := os.Stat(fullPath)
+	file_path := strings.ReplaceAll(uri_path, asset_path, "")
+	fullPath := filepath.Join(asset_dir, file_path)
 	
-	return  err == nil && info.IsDir()
+	if embedFS != nil {
+		_, err := fs.Stat(embedFS, fullPath)
+		return err == nil
+	}
+
+	_, err := os.Stat(fullPath)
+	return  err == nil
 }
 
 func Handle(handlers []MiddlewareFunc, handler http.Handler) http.Handler {
