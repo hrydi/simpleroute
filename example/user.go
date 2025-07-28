@@ -1,16 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 
-	sr "github.com/hrydi/simpleroute/pkg/http"
+	"github.com/hrydi/simpleroute"
 )
 
 type userImpl struct{}
 
-func helloMiddleware() sr.MiddlewareFunc {
+func helloMiddleware() simpleroute.MiddlewareFunc {
 	return func (next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			log.Println("calling hello middleware")
@@ -20,9 +21,9 @@ func helloMiddleware() sr.MiddlewareFunc {
 }
 
 // Routes implements http.HttpRouter.
-func (u *userImpl) Routes(r sr.RouteRegister) {
+func (u *userImpl) Routes(r simpleroute.RouteRegister) {
 	
-	r.Group("/user", func(router sr.Router) sr.Router {
+	r.Group("/user", func(router simpleroute.Router) simpleroute.Router {
 		return router.
 		Get("/", 
 			func() http.Handler {
@@ -35,7 +36,10 @@ func (u *userImpl) Routes(r sr.RouteRegister) {
 		Get("/profile", 
 			func() http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					fmt.Fprintf(w, "Profle")
+					json.NewEncoder(w).Encode(map[string]any{
+						"name": "Username",
+						"age": 19,
+					})
 				})
 			}(),
 		)
@@ -46,4 +50,4 @@ func NewUser() *userImpl {
 	return &userImpl{}
 }
 
-var _ sr.HttpRouter = (*userImpl)(nil)
+var _ simpleroute.HttpRouter = (*userImpl)(nil)

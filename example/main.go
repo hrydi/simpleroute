@@ -8,7 +8,7 @@ import (
 	"os"
 	"syscall"
 
-	sr "github.com/hrydi/simpleroute/pkg/http"
+	"github.com/hrydi/simpleroute"
 	"github.com/hrydi/simpleroute/pkg/signal"
 )
 
@@ -19,8 +19,8 @@ func main() {
 	sigCh := signal.HandleSignals(os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	ctx, _ := signal.CreateContext(sigCh)
 
-	server := sr.NewHttp("0.0.0.0:17881")
-	router := sr.NewRouter(sr.RouterConfig{
+	server := simpleroute.NewHttp("0.0.0.0:17881")
+	router := simpleroute.NewRouter(simpleroute.RouterConfig{
 		AssetPath: "/assets/",
 		AssetDir:  "static",
 		FS:        staticFS,
