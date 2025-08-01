@@ -41,3 +41,15 @@ func (u *userImpl) Routes(r simpleroute.RouteRegister) {
 	})
 }
 ```
+
+### How to use
+#### you could run make command for this example, for development use, run this command and then attach to each of running containers and start each services from their console :D
+```bash
+make compose-run
+```
+
+### Pre-Production build
+#### Run this command to preview production build
+```bash
+make build
+```
