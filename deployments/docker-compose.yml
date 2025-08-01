@@ -1,12 +1,34 @@
 services:
+  hrydi-simple-route-build:
+    container_name: hrydi-simple-route-build
+    build:
+      context: ../
+      dockerfile: ./build/Dockerfile
+      target: "prod"
+    env_file: .env
+    ports:
+      - ${HTTP_PORT}:${HTTP_PORT}
+  
   hrydi-simple-route:
     container_name: hrydi-simple-route
     build:
       context: ../
       dockerfile: ./build/Dockerfile
-      target: "build"
+      target: "base-go"
     env_file: .env
     restart: always
     command: sleep infinity
     volumes:
       - ${PWD}:/home/ubuntu/apps:z
+
+  hrydi-simple-ui:
+    container_name: hrydi-simple-ui
+    build:
+      context: ../
+      dockerfile: ./build/Dockerfile
+      target: "pre-build"
+    env_file: .env
+    restart: always
+    command: sleep infinity
+    volumes:
+      - ${PWD}/example/ui/vue:/home/node/ui:z

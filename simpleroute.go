@@ -22,6 +22,7 @@ type RouterConfig struct {
 	AssetDir  string
 	AssetPath string
 	FS        fs.FS
+	UseProxy  bool
 }
 
 type Router interface {
@@ -39,7 +40,10 @@ type RouteRegister interface {
 }
 
 type MiddlewareFunc = func(http.Handler) http.Handler
+
 type RouterAction = func(router Router) Router
+
+type ContextKey string
 
 type route struct {
 	method      string
@@ -173,8 +177,10 @@ func (r *routerImpl) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	patterns := strings.Split(pattern, " ")
 
 	if len(patterns) == 2 {
+
 		_, ok := r.matchPath(patterns[1], req.URL.Path)
-		if !ok {
+
+		if !ok && !r.config.UseProxy {
 			http.Error(res, "page not found", http.StatusNotFound)
 			return
 		}
@@ -229,7 +235,7 @@ func (r *routerImpl) Build() *routerImpl {
 func (r *routerImpl) setupRoutes() (*http.ServeMux, []route) {
 
 	mux := http.NewServeMux()
-	
+
 	if r.config.AssetPath != "" && r.config.AssetDir != "" {
 
 		var fsHandler http.Handler = http.FileServer(http.Dir(r.config.AssetDir))
@@ -242,7 +248,7 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route) {
 
 			fsHandler = http.FileServer(http.FS(content))
 		}
-		
+
 		r.Get(r.config.AssetPath, http.StripPrefix(r.config.AssetPath, fsHandler))
 	}
 
@@ -271,7 +277,7 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route) {
 }
 
 func (r *routerImpl) matchPath(pattern, path string) (map[string]string, bool) {
-	
+
 	if strings.Contains(pattern, r.config.AssetPath) && existsInStatic(path, r.config.AssetPath, r.config.AssetDir, r.config.FS) {
 		return nil, true
 	}

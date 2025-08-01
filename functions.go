@@ -70,14 +70,14 @@ func existsInStatic(uri_path, asset_path, asset_dir string, embedFS fs.FS) bool 
 
 	file_path := strings.ReplaceAll(uri_path, asset_path, "")
 	fullPath := filepath.Join(asset_dir, file_path)
-	
+
 	if embedFS != nil {
 		_, err := fs.Stat(embedFS, fullPath)
 		return err == nil
 	}
 
 	_, err := os.Stat(fullPath)
-	return  err == nil
+	return err == nil
 }
 
 func Handle(handlers []MiddlewareFunc, handler http.Handler) http.Handler {
@@ -86,7 +86,7 @@ func Handle(handlers []MiddlewareFunc, handler http.Handler) http.Handler {
 	}
 
 	for i := range handlers {
-		handler = handlers[len(handlers) - 1 - i](handler)
+		handler = handlers[len(handlers)-1-i](handler)
 	}
 
 	return handler

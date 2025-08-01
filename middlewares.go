@@ -1,9 +1,21 @@
 package simpleroute
 
 import (
+	"context"
 	"log"
 	"net/http"
 )
+
+func WithContext(name string, value any) MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			nameCtx := ContextKey(name)
+			ctx := context.WithValue(r.Context(), nameCtx, value)
+			req := r.WithContext(ctx)
+			next.ServeHTTP(w, req)
+		})
+	}
+}
 
 func ContentTypeJson(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
