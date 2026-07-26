@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"embed"
 	"net/http"
 	"net/http/httputil"
@@ -17,15 +16,10 @@ type ui struct {
 	proxy *httputil.ReverseProxy
 }
 
-// Routes implements simpleroute.HttpRouter.
 func (u *ui) Routes(r simpleroute.RouteRegister) {
-	r.Use("/", 
-		func() http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				u.proxy.ServeHTTP(w, r)
-			})
-		}(),
-	)
+	r.Use("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u.proxy.ServeHTTP(w, r)
+	}))
 }
 
 func New(url *url.URL) *ui {

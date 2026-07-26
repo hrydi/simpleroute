@@ -2,6 +2,7 @@ package simpleroute
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 )
@@ -15,17 +16,21 @@ type HttpRouter interface {
 	Routes(r RouteRegister)
 }
 
-type HttpResponse struct {
-	Error   bool   `json:"error"`
-	Message string `json:"message"`
-	Data    any    `json:"data"`
+func Params(r *http.Request) map[string]string {
+	params, _ := r.Context().Value(ParamsContextKey).(map[string]string)
+	return params
+}
+
+func JSON(w http.ResponseWriter, code int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(data)
 }
 
 type httpServerImpl struct {
 	app    http.Server
 }
 
-// Start implements HttpServer.
 func (h *httpServerImpl) Start(router http.Handler) {
 	h.app.Handler = RecoverMiddleware(router)
 	if err := h.app.ListenAndServe(); err != nil {
@@ -33,7 +38,6 @@ func (h *httpServerImpl) Start(router http.Handler) {
 	}
 }
 
-// Stop implements HttpServer.
 func (h *httpServerImpl) Stop(ctx context.Context) error {
 	return h.app.Shutdown(ctx)
 }

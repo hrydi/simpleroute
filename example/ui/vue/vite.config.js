@@ -4,6 +4,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
+const port = process.env.VITE_PORT ?? 5566
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -17,7 +19,7 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: process.env.VITE_PORT,
+    port,
     allowedHosts: true,
   }
 })

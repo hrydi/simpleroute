@@ -1,12 +1,12 @@
 package main
 
 import (
-	// "embed"
 	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"syscall"
 	"fmt"
 
@@ -15,50 +15,73 @@ import (
 	"github.com/hrydi/simpleroute/pkg/signal"
 )
 
-// //go:embed static/*
-// var staticFS embed.FS
+func loadEnv(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		kv := strings.SplitN(line, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		k, v := strings.TrimSpace(kv[0]), strings.TrimSpace(kv[1])
+		if k != "" && os.Getenv(k) == "" {
+			os.Setenv(k, v)
+		}
+	}
+}
 
 func main() {
+	loadEnv(".env")
+
 	sigCh := signal.HandleSignals(os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	ctx, _ := signal.CreateContext(sigCh)
 
 	server := simpleroute.NewHttp(fmt.Sprintf("0.0.0.0:%s", os.Getenv("HTTP_PORT")))
 
-	routerConfig := simpleroute.RouterConfig{
+	router := simpleroute.NewRouter(simpleroute.RouterConfig{
 		AssetPath: "/assets/",
 		AssetDir:  "vue/dist/assets",
 		FS:        ui.UIStaticFS,
-	}
+	})
 
 	if os.Getenv("DEV") == "development" {
-		routerConfig = simpleroute.RouterConfig{UseProxy: true}
-	}
-
-	router := simpleroute.NewRouter(routerConfig)
-	
-	if os.Getenv("DEV") == "development" {
-		viteUrl, err := url.Parse("http://hrydi-simple-ui:6668")
+		host := os.Getenv("VITE_HOST")
+		if host == "" {
+			host = "localhost"
+		}
+		port := os.Getenv("VITE_PORT")
+		if port == "" {
+			port = "5566"
+		}
+		viteUrl, err := url.Parse(fmt.Sprintf("http://%s:%s", host, port))
 		if err == nil {
 			router.Use(ui.New(viteUrl))
 		}
-	}else{
-		router.Use("/", func() http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				staticFS, err := fs.Sub(ui.UIStaticFS, "vue/dist")
-				if err != nil {
-					http.NotFound(w, r)
-					return
-				}
-
-				http.ServeFileFS(w, r, staticFS, "/index.html")
-			})
-		}())
+	} else {
+		spa := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			staticFS, err := fs.Sub(ui.UIStaticFS, "vue/dist")
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			http.ServeFileFS(w, r, staticFS, "/index.html")
+		})
+		router.Use("/", spa)
 	}
-	
 
 	router.Use(NewUser())
-	
-	go server.Start(router.Build())
+
+	if err := router.Build(); err != nil {
+		log.Fatalf("router build error: %v", err)
+	}
+
+	go server.Start(router)
 
 	<-ctx.Done()
 

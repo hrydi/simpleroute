@@ -1,7 +1,6 @@
 package simpleroute
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -90,47 +89,4 @@ func Handle(handlers []MiddlewareFunc, handler http.Handler) http.Handler {
 	}
 
 	return handler
-}
-
-func responseHandler(w http.ResponseWriter, code int, response HttpResponse) {
-	contentType := w.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		w.Header().Set("Content-Type", "application/json")
-	}
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(response)
-}
-
-func SuccessResponseHandler(w http.ResponseWriter, code int, message string, data any) {
-	responseHandler(w, code, HttpResponse{
-		Message: message,
-		Error:   false,
-		Data:    data,
-	})
-}
-
-func ErrorResponseHandler(w http.ResponseWriter, code int, message string) {
-	responseHandler(w, code, HttpResponse{
-		Message: message,
-		Error:   true,
-	})
-}
-
-func GetFullURL(r *http.Request) string {
-	// Default to http or https based on TLS
-	scheme := "http"
-	if r.Header.Get("X-Forwarded-Proto") != "" {
-		scheme = r.Header.Get("X-Forwarded-Proto")
-	} else if r.TLS != nil {
-		scheme = "https"
-	}
-
-	// Use X-Forwarded-Host if available, otherwise fallback to r.Host
-	host := r.Host
-	if xfHost := r.Header.Get("X-Forwarded-Host"); xfHost != "" {
-		host = xfHost
-	}
-
-	// Combine to get full URL
-	return fmt.Sprintf("%s://%s%s", scheme, host, r.RequestURI)
 }
