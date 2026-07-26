@@ -10,6 +10,7 @@ import (
 )
 
 func TestNewRouter(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	if r == nil {
 		t.Fatal("NewRouter returned nil")
@@ -17,6 +18,7 @@ func TestNewRouter(t *testing.T) {
 }
 
 func TestBuildNotCalled(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/test", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 
@@ -30,6 +32,7 @@ func TestBuildNotCalled(t *testing.T) {
 }
 
 func TestGetRoute(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/hello", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "world")
@@ -51,6 +54,7 @@ func TestGetRoute(t *testing.T) {
 }
 
 func TestPostRoute(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Post("/data", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "created")
@@ -71,7 +75,81 @@ func TestPostRoute(t *testing.T) {
 	}
 }
 
+func TestHeadAutoRoute(t *testing.T) {
+	t.Parallel()
+	r := NewRouter(RouterConfig{})
+	var gotHeaders bool
+	r.Get("/data", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Custom", "val")
+		gotHeaders = true
+		fmt.Fprint(w, "body content")
+	}))
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("HEAD", "/data", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if rec.Header().Get("X-Custom") != "val" {
+		t.Errorf("expected X-Custom header 'val', got '%s'", rec.Header().Get("X-Custom"))
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("expected empty body for HEAD, got '%s'", rec.Body.String())
+	}
+	if !gotHeaders {
+		t.Error("GET handler was not called")
+	}
+}
+
+func TestHeadAutoRouteWithParams(t *testing.T) {
+	t.Parallel()
+	r := NewRouter(RouterConfig{})
+	r.Get("/users/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := Params(r)["id"]
+		fmt.Fprint(w, id)
+	}))
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("HEAD", "/users/42", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("expected empty body for HEAD, got '%s'", rec.Body.String())
+	}
+}
+
+func TestHeadAutoRouteNotAllowed(t *testing.T) {
+	t.Parallel()
+	r := NewRouter(RouterConfig{})
+	r.Post("/data", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "post only")
+	}))
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("HEAD", "/data", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", rec.Code)
+	}
+}
+
 func TestHeadRoute(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Head("/check", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Custom", "val")
@@ -94,6 +172,7 @@ func TestHeadRoute(t *testing.T) {
 }
 
 func TestNotFound(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/exists", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	if err := r.Build(); err != nil {
@@ -110,6 +189,7 @@ func TestNotFound(t *testing.T) {
 }
 
 func TestMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/resource", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "ok")
@@ -128,6 +208,7 @@ func TestMethodNotAllowed(t *testing.T) {
 }
 
 func TestPathParams(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/user/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		params := Params(r)
@@ -150,6 +231,7 @@ func TestPathParams(t *testing.T) {
 }
 
 func TestPathParamsMultiple(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/{a}/x/{b}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		params := Params(r)
@@ -172,6 +254,7 @@ func TestPathParamsMultiple(t *testing.T) {
 }
 
 func TestParamsReturnsNil(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/plain", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := Params(r)
@@ -193,6 +276,7 @@ func TestParamsReturnsNil(t *testing.T) {
 }
 
 func TestGroupRoutes(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Group("/api", func(router Router) Router {
 		return router.Get("/ping", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +300,7 @@ func TestGroupRoutes(t *testing.T) {
 }
 
 func TestGroupMiddleware(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Use(middleware("root"))
 	r.Group("/g", func(router Router) Router {
@@ -235,6 +320,7 @@ func TestGroupMiddleware(t *testing.T) {
 }
 
 func TestRouteConflictDetection(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/same", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "first")
@@ -242,21 +328,13 @@ func TestRouteConflictDetection(t *testing.T) {
 	r.Get("/same", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "second")
 	}))
-	if err := r.Build(); err != nil {
-		t.Fatal(err)
-	}
-
-	// First route should win (kept by seen map)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/same", nil)
-	r.ServeHTTP(rec, req)
-
-	if rec.Body.String() != "first" {
-		t.Errorf("expected 'first' (first registered wins), got '%s'", rec.Body.String())
+	if err := r.Build(); err == nil {
+		t.Fatal("expected conflict error, got nil")
 	}
 }
 
 func TestGlobalMiddlewareOrder(t *testing.T) {
+	t.Parallel()
 	var order []string
 	mu := &sync.Mutex{}
 	record := func(s string) { mu.Lock(); order = append(order, s); mu.Unlock() }
@@ -302,6 +380,7 @@ func TestGlobalMiddlewareOrder(t *testing.T) {
 }
 
 func TestMiddlewareVaryingArgs(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	mw := middleware("mw")
 
@@ -323,6 +402,7 @@ func TestMiddlewareVaryingArgs(t *testing.T) {
 }
 
 func TestBuildIdempotent(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/a", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "a")
@@ -346,6 +426,7 @@ func TestBuildIdempotent(t *testing.T) {
 }
 
 func TestBuildConcurrent(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/a", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "a")
@@ -372,6 +453,7 @@ func TestBuildConcurrent(t *testing.T) {
 }
 
 func TestUseWithHttpRouter(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Use(httpRouterFunc(func(rr RouteRegister) {
 		rr.Get("/from-router", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -395,6 +477,7 @@ func TestUseWithHttpRouter(t *testing.T) {
 }
 
 func TestCatchAllWithParams(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Use("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "catch-all")
@@ -432,6 +515,7 @@ func TestCatchAllWithParams(t *testing.T) {
 }
 
 func TestMethodOverrideViaUse(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Use("PUT", "/item", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "updated")
@@ -461,6 +545,7 @@ func TestMethodOverrideViaUse(t *testing.T) {
 }
 
 func TestMultipleRoutesDifferentMethods(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/resource", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "read")
@@ -486,6 +571,7 @@ func TestMultipleRoutesDifferentMethods(t *testing.T) {
 }
 
 func TestRecoverMiddleware(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/panic", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("test panic")
@@ -504,6 +590,7 @@ func TestRecoverMiddleware(t *testing.T) {
 }
 
 func TestCatchAllMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Use("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "catch-all")
@@ -525,6 +612,7 @@ func TestCatchAllMethodNotAllowed(t *testing.T) {
 }
 
 func TestCORSOriginAllowed(t *testing.T) {
+	t.Parallel()
 	cfg := CORSConfig{
 		AllowedOrigins: []string{"http://example.com"},
 	}
@@ -548,6 +636,7 @@ func TestCORSOriginAllowed(t *testing.T) {
 }
 
 func TestCORSOriginDenied(t *testing.T) {
+	t.Parallel()
 	cfg := CORSConfig{
 		AllowedOrigins: []string{"http://allowed.com"},
 	}
@@ -571,6 +660,7 @@ func TestCORSOriginDenied(t *testing.T) {
 }
 
 func TestCORSPreflight(t *testing.T) {
+	t.Parallel()
 	cfg := CORSConfig{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "POST"},
@@ -602,6 +692,7 @@ func TestCORSPreflight(t *testing.T) {
 }
 
 func TestCORSNoOrigin(t *testing.T) {
+	t.Parallel()
 	cfg := CORSConfig{
 		AllowedOrigins: []string{"http://example.com"},
 	}
@@ -624,6 +715,7 @@ func TestCORSNoOrigin(t *testing.T) {
 }
 
 func TestContentTypeJsonMiddleware(t *testing.T) {
+	t.Parallel()
 	handler := ContentTypeJson(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -638,6 +730,7 @@ func TestContentTypeJsonMiddleware(t *testing.T) {
 }
 
 func TestWithContextMiddleware(t *testing.T) {
+	t.Parallel()
 	handler := WithContext("user", "alice")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if v := r.Context().Value(ContextKey("user")); v != "alice" {
 			t.Errorf("expected 'alice', got '%v'", v)
@@ -650,6 +743,7 @@ func TestWithContextMiddleware(t *testing.T) {
 }
 
 func TestHandleFunc(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Get("/data", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -672,6 +766,7 @@ func TestHandleFunc(t *testing.T) {
 }
 
 func TestEmptyRouterServeHTTP(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	if err := r.Build(); err != nil {
 		t.Fatal(err)
@@ -687,6 +782,7 @@ func TestEmptyRouterServeHTTP(t *testing.T) {
 }
 
 func TestMethodNotAllowedGroup(t *testing.T) {
+	t.Parallel()
 	r := NewRouter(RouterConfig{})
 	r.Group("/api", func(router Router) Router {
 		return router.Post("/data", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -707,6 +803,7 @@ func TestMethodNotAllowedGroup(t *testing.T) {
 }
 
 func TestJSONWriter(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	JSON(rec, http.StatusCreated, map[string]string{"id": "abc"})
 	if rec.Code != http.StatusCreated {
@@ -737,6 +834,29 @@ func middleware(name string) MiddlewareFunc {
 var h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "ok")
 })
+
+type nopLogger struct{}
+
+func (nopLogger) Errorf(string, ...any) {}
+func (nopLogger) Warnf(string, ...any)  {}
+func (nopLogger) Infof(string, ...any)  {}
+func (nopLogger) Debugf(string, ...any) {}
+
+func TestParallelLoggerRace(t *testing.T) {
+	t.Parallel()
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = NewRouter(RouterConfig{
+				Logger: nopLogger{},
+			})
+			_ = GetLogger()
+		}()
+	}
+	wg.Wait()
+}
 
 type httpRouterFunc func(RouteRegister)
 

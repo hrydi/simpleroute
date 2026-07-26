@@ -10,6 +10,7 @@ import (
 	"sync"
 )
 
+// METHODS lists all HTTP methods the router supports.
 var METHODS = []string{
 	"GET",
 	"HEAD",
@@ -20,12 +21,19 @@ var METHODS = []string{
 	"OPTIONS",
 }
 
+// RouterConfig configures a new router instance.
 type RouterConfig struct {
-	AssetDir  string
-	AssetPath string
-	FS        fs.FS
+	AssetDir               string
+	AssetPath              string
+	FS                     fs.FS
+	Logger                 Logger
+	LogLevel               LogLevel
+	BaseContext            context.Context
+	NotFoundHandler        http.Handler
+	MethodNotAllowedHandler http.Handler
 }
 
+// Router defines HTTP method handlers for route registration.
 type Router interface {
 	Get(path string, args ...any) Router
 	Post(path string, args ...any) Router
@@ -33,20 +41,26 @@ type Router interface {
 	Patch(path string, args ...any) Router
 	Delete(path string, args ...any) Router
 	Head(path string, args ...any) Router
+	Mount(path string, sub http.Handler) Router
 }
 
+// RouteRegister extends Router with group and middleware registration.
 type RouteRegister interface {
 	Router
 	Group(path string, args ...any) Router
 	Use(args ...any) RouteRegister
 }
 
+// MiddlewareFunc wraps an http.Handler to add cross-cutting behavior.
 type MiddlewareFunc = func(http.Handler) http.Handler
 
+// RouterAction is a callback that receives a Router and returns it.
 type RouterAction = func(router Router) Router
 
+// ContextKey is used for request context value keys.
 type ContextKey string
 
+// ParamsContextKey is the context key for path parameters.
 const ParamsContextKey ContextKey = "route_params"
 
 type route struct {
@@ -59,11 +73,13 @@ type route struct {
 
 type routerImpl struct {
 	config        RouterConfig
+	log           Logger
 	group         string
 	groups        map[string]Router
 	routes        map[string][]route
 	middlewares   []MiddlewareFunc
 	routeHandlers []route
+	allowMethods  map[string][]string
 	mux           *http.ServeMux
 
 	once      sync.Once
@@ -95,6 +111,21 @@ func (r *routerImpl) Head(path string, args ...any) Router {
 	return r.Handle("HEAD", path, args...)
 }
 
+// Mount attaches a sub-handler under the given path prefix.
+// All requests to path/* are forwarded to the sub-handler.
+func (r *routerImpl) Mount(path string, sub http.Handler) Router {
+	if !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
+	for _, m := range METHODS {
+		r.Use(m, path, sub)
+	}
+	return r
+}
+
+// Group creates a route group under the given path prefix.
+// Extra args are treated as group-level middleware (MiddlewareFunc or []MiddlewareFunc).
+// The last func(Router) Router argument is the callback that receives a Router with no Use method.
 func (r *routerImpl) Group(path string, args ...any) Router {
 	var callbackRoute RouterAction
 	var middlewares []MiddlewareFunc
@@ -124,6 +155,11 @@ func (r *routerImpl) Group(path string, args ...any) Router {
 	return r
 }
 
+// Use is the polymorphic registration entry point.
+// It accepts: HttpRouter, string (method or pattern), http.Handler,
+// MiddlewareFunc, and []MiddlewareFunc in any order.
+// If method+pattern+handler are present, a route is registered.
+// Otherwise middleware args are appended to the global middleware list.
 func (r *routerImpl) Use(args ...any) RouteRegister {
 	var method = "GET"
 	var pattern string
@@ -164,10 +200,34 @@ func (r *routerImpl) Use(args ...any) RouteRegister {
 	return r
 }
 
+// headResponseWriter discards the body on write so HEAD handlers
+// can reuse GET handlers without sending a response body.
+type headResponseWriter struct {
+	http.ResponseWriter
+}
+
+func (h *headResponseWriter) Write(b []byte) (int, error) {
+	return len(b), nil
+}
+
+// ServeHTTP implements http.Handler. It matches the request against registered patterns
+// and path parameters, injects matched parameters into the context, and dispatches
+// to the wrapped handler (with middleware). Returns 500 if Build() was not called.
 func (r *routerImpl) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	if !r.built {
+		r.log.Errorf("routes not initialized")
 		http.Error(res, "routes not initialize", http.StatusInternalServerError)
 		return
+	}
+
+	if r.config.BaseContext != nil {
+		ctx, cancel := context.WithCancel(r.config.BaseContext)
+		defer cancel()
+		req = req.WithContext(ctx)
+	}
+
+	if req.Method == http.MethodHead {
+		res = &headResponseWriter{ResponseWriter: res}
 	}
 
 	_, pattern := r.mux.Handler(req)
@@ -175,23 +235,25 @@ func (r *routerImpl) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 
 	if len(patterns) == 2 {
 		pathPattern := patterns[1]
-		if pathPattern == "/" {
-			// Subtree catch-all — check parameterized routes first
-			for _, mh := range r.routeHandlers {
-				params, ok := r.matchPath(mh.pattern, req.URL.Path)
-				if !ok {
-					continue
-				}
-				if mh.method != req.Method {
-					http.Error(res, "method not allowed", http.StatusMethodNotAllowed)
+		if strings.HasSuffix(pathPattern, "/") {
+			if pathPattern == "/" {
+				// Root catch-all — check parameterized routes first
+				for _, mh := range r.routeHandlers {
+					params, ok := r.matchPath(mh.pattern, req.URL.Path)
+					if !ok {
+						continue
+					}
+					rw, ok := r.matchMethod(mh, res, req)
+					if !ok {
+						return
+					}
+					if len(params) > 0 {
+						ctx := context.WithValue(req.Context(), ParamsContextKey, params)
+						req = req.WithContext(ctx)
+					}
+					mh.wrapped.ServeHTTP(rw, req)
 					return
 				}
-				if len(params) > 0 {
-					ctx := context.WithValue(req.Context(), ParamsContextKey, params)
-					req = req.WithContext(ctx)
-				}
-				mh.wrapped.ServeHTTP(res, req)
-				return
 			}
 			r.mux.ServeHTTP(res, req)
 			return
@@ -204,7 +266,7 @@ func (r *routerImpl) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 			r.mux.ServeHTTP(res, req)
 			return
 		}
-		http.Error(res, "page not found", http.StatusNotFound)
+		r.writeNotFound(res, req)
 		return
 	}
 
@@ -213,21 +275,61 @@ func (r *routerImpl) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 		if !ok {
 			continue
 		}
-		if mh.method != req.Method {
-			http.Error(res, "method not allowed", http.StatusMethodNotAllowed)
+		rw, ok := r.matchMethod(mh, res, req)
+		if !ok {
 			return
 		}
 		if len(params) > 0 {
 			ctx := context.WithValue(req.Context(), ParamsContextKey, params)
 			req = req.WithContext(ctx)
 		}
-		mh.wrapped.ServeHTTP(res, req)
+		mh.wrapped.ServeHTTP(rw, req)
 		return
 	}
 
+	r.writeNotFound(res, req)
+}
+
+// matchMethod checks whether the request method matches the route.
+// HEAD requests are allowed to match GET routes (body is already stripped
+// by the headResponseWriter installed at the top of ServeHTTP).
+func (r *routerImpl) matchMethod(mh route, res http.ResponseWriter, req *http.Request) (http.ResponseWriter, bool) {
+	if mh.method == req.Method {
+		return res, true
+	}
+	if req.Method == http.MethodHead && mh.method == http.MethodGet {
+		return res, true
+	}
+	r.writeMethodNotAllowed(res, req, mh.pattern)
+	return res, false
+}
+
+func (r *routerImpl) writeMethodNotAllowed(res http.ResponseWriter, req *http.Request, pattern string) {
+	methods := r.allowMethods[pattern]
+	if len(methods) > 0 {
+		res.Header().Set("Allow", strings.Join(methods, ", "))
+	}
+	if req.Method == http.MethodOptions {
+		res.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.config.MethodNotAllowedHandler != nil {
+		r.config.MethodNotAllowedHandler.ServeHTTP(res, req)
+		return
+	}
+	http.Error(res, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (r *routerImpl) writeNotFound(res http.ResponseWriter, req *http.Request) {
+	if r.config.NotFoundHandler != nil {
+		r.config.NotFoundHandler.ServeHTTP(res, req)
+		return
+	}
 	http.Error(res, "page not found", http.StatusNotFound)
 }
 
+// Handle is the internal route registration method used by Get/Post/etc.
+// It collects method, path, and optional middleware into a single call to Use.
 func (r *routerImpl) Handle(method, path string, args ...any) *routerImpl {
 	params := make([]any, 0, 2+len(args))
 	params = append(params, method, path)
@@ -235,6 +337,8 @@ func (r *routerImpl) Handle(method, path string, args ...any) *routerImpl {
 	return r.Use(params...).(*routerImpl)
 }
 
+// Build compiles all registered routes and middlewares into the final handler tree.
+// Must be called before the router can ServeHTTP. Idempotent and concurrent-safe.
 func (r *routerImpl) Build() error {
 	r.once.Do(func() {
 		mux, handlers, err := r.setupRoutes()
@@ -273,7 +377,7 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route, error) {
 	for _, rt := range rootRoutes {
 		pat := fmt.Sprintf("%s %s", rt.method, rt.pattern)
 		if seen[pat] {
-			continue
+			return nil, nil, fmt.Errorf("route conflict: %s", pat)
 		}
 		seen[pat] = true
 		wrapped := Handle(rt.middlewares, rt.handler)
@@ -294,7 +398,7 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route, error) {
 			handlers = append(handlers, rt.middlewares...)
 			pat := fmt.Sprintf("%s %s", rt.method, rt.pattern)
 			if seen[pat] {
-				continue
+				return nil, nil, fmt.Errorf("route conflict: %s", pat)
 			}
 			seen[pat] = true
 			wrapped := Handle(handlers, rt.handler)
@@ -309,6 +413,15 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route, error) {
 		}
 	}
 
+	allow := make(map[string][]string)
+	for _, rt := range allRoutes {
+		allow[rt.pattern] = append(allow[rt.pattern], rt.method)
+	}
+	for p := range allow {
+		slices.Sort(allow[p])
+	}
+	r.allowMethods = allow
+
 	return mux, allRoutes, nil
 }
 
@@ -319,9 +432,15 @@ func (r *routerImpl) matchPath(pattern, path string) (map[string]string, bool) {
 	return matchPath(pattern, path)
 }
 
+// NewRouter creates a new router with the given configuration.
 func NewRouter(config RouterConfig) *routerImpl {
+	l := resolveLogger(config)
+	if config.Logger != nil {
+		setPkgLogger(l)
+	}
 	return &routerImpl{
 		config:      config,
+		log:         l,
 		routes:      make(map[string][]route),
 		groups:      make(map[string]Router),
 		middlewares: make([]MiddlewareFunc, 0),

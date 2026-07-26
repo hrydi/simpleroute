@@ -36,18 +36,29 @@ func loadEnv(path string) {
 	}
 }
 
+type appLogger struct{}
+
+func (appLogger) Errorf(format string, args ...any) { log.Printf("[APP] [ERROR] "+format, args...) }
+func (appLogger) Warnf(format string, args ...any)  { log.Printf("[APP] [WARN]  "+format, args...) }
+func (appLogger) Infof(format string, args ...any)  { log.Printf("[APP] [INFO]  "+format, args...) }
+func (appLogger) Debugf(format string, args ...any) { log.Printf("[APP] [DEBUG] "+format, args...) }
+
 func main() {
 	loadEnv(".env")
 
 	sigCh := signal.HandleSignals(os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	ctx, _ := signal.CreateContext(sigCh)
 
-	server := simpleroute.NewHttp(fmt.Sprintf("0.0.0.0:%s", os.Getenv("HTTP_PORT")))
+	server := simpleroute.NewHttp(simpleroute.ServerConfig{
+		Addr: fmt.Sprintf("0.0.0.0:%s", os.Getenv("HTTP_PORT")),
+	})
 
 	router := simpleroute.NewRouter(simpleroute.RouterConfig{
 		AssetPath: "/assets/",
 		AssetDir:  "vue/dist/assets",
 		FS:        ui.UIStaticFS,
+		Logger:    appLogger{},
+		LogLevel:  simpleroute.LogLevelDebug,
 	})
 
 	if os.Getenv("DEV") == "development" {
@@ -71,7 +82,9 @@ func main() {
 				return
 			}
 			http.ServeFileFS(w, r, staticFS, "/index.html")
-		})
+	})
+
+	router.Use(NewUser())
 		router.Use("/", spa)
 	}
 
@@ -81,7 +94,11 @@ func main() {
 		log.Fatalf("router build error: %v", err)
 	}
 
-	go server.Start(router)
+	go func() {
+		if err := server.Start(router); err != nil {
+			log.Fatalf("server start error: %v", err)
+		}
+	}()
 
 	<-ctx.Done()
 

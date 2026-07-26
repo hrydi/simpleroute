@@ -45,7 +45,9 @@ func main() {
 	}
 
 	server := simpleroute.NewHttp(":8080")
-	server.Start(router)
+	if err := server.Start(router); err != nil {
+		panic(err)
+	}
 }
 ```
 
@@ -86,6 +88,82 @@ func main() {
 | `Params(r) map[string]string` | Extract path parameters from context |
 | `JSON(w, code, data)` | Write JSON response with content-type |
 | `Handle(middlewares, handler)` | Build middleware chain |
+| `SetCtx(r, key, val) *http.Request` | Store value in request context (chainable) |
+| `GetCtx[T](r, key) (T, bool)` | Retrieve typed value from request context |
+
+## Context
+
+### Base context
+
+Set a parent context for all requests via `RouterConfig`:
+
+```go
+ctx, cancel := context.WithCancel(context.Background())
+
+r := simpleroute.NewRouter(simpleroute.RouterConfig{
+    BaseContext: ctx,  // cancel ctx → all in-flight requests cancelled
+})
+```
+
+### Request-scoped values
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    r = simpleroute.SetCtx(r, "user", user)
+    // ... later or in middleware:
+    user, ok := simpleroute.GetCtx[*User](r, "user")
+}
+```
+
+`SetCtx` is chainable:
+```go
+r = simpleroute.SetCtx(simpleroute.SetCtx(r, "a", 1), "b", 2)
+```
+
+### Path parameters
+
+```go
+id := simpleroute.Params(r)["id"]
+```
+
+## Pluggable Logger
+
+Set the logger once via `RouterConfig` — it applies to both router internals and middleware:
+
+```go
+r := simpleroute.NewRouter(simpleroute.RouterConfig{
+    Logger:   myLogger{},
+    LogLevel: simpleroute.LogLevelDebug,
+})
+```
+
+Levels: `LogLevelError` → `LogLevelWarn` → `LogLevelInfo` (default) → `LogLevelDebug`.
+
+### Interface
+
+```go
+type Logger interface {
+    Errorf(format string, args ...any)
+    Warnf(format string, args ...any)
+    Infof(format string, args ...any)
+    Debugf(format string, args ...any)
+}
+```
+
+### Example with zerolog
+
+```go
+type zeroLogger struct {
+    l zerolog.Logger
+}
+
+func (z *zeroLogger) Errorf(format string, args ...any) { z.l.Error().Msgf(format, args...) }
+func (z *zeroLogger) Warnf(format string, args ...any)  { z.l.Warn().Msgf(format, args...) }
+func (z *zeroLogger) Infof(format string, args ...any)  { z.l.Info().Msgf(format, args...) }
+func (z *zeroLogger) Debugf(format string, args ...any) { z.l.Debug().Msgf(format, args...) }
+```
+
+Defaults to `[simpleroute] [INFO/ERROR/...]` prefixed output via `log.Printf`.
 
 ## Path Parameters
 
@@ -141,8 +219,13 @@ router := simpleroute.NewRouter(simpleroute.RouterConfig{
 
 ```go
 server := simpleroute.NewHttp(":8080")
-server.Start(router)  // blocks, adds RecoverMiddleware automatically
-server.Stop(ctx)      // graceful shutdown
+go func() {
+	if err := server.Start(router); err != nil {
+		log.Fatal(err)
+	}
+}()
+// ... later
+server.Stop(ctx)  // graceful shutdown
 ```
 
 ## CORS Example
@@ -163,18 +246,18 @@ router.Use("/api", apiHandler, simpleroute.CORS(simpleroute.CORSConfig{
 goos: linux
 goarch: amd64
 cpu: 11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz
-BenchmarkStaticRoute-8               3,194,821    349 ns/op    450 B/op     7 allocs/op
-BenchmarkStaticRouteDeep-8           1,893,676    585 ns/op    720 B/op    11 allocs/op
-BenchmarkPathParams-8                1,483,275    783 ns/op   1448 B/op    18 allocs/op
-BenchmarkNotFound-8                  1,378,639    936 ns/op   1584 B/op    27 allocs/op
-BenchmarkCatchAll-8                  2,037,715    575 ns/op    688 B/op    17 allocs/op
-BenchmarkMultipleRoutes (1000)-8     2,236,489    513 ns/op    624 B/op    11 allocs/op
-BenchmarkBuild (1000 routes)-8             198  5.67 ms/op  4.67 MB/op    42k allocs/op
-BenchmarkMiddlewareChainDepth (10)-8 3,462,081    341 ns/op    450 B/op     7 allocs/op
-BenchmarkParamsExtraction-8          1,758,046    738 ns/op   1312 B/op    16 allocs/op
-BenchmarkGroupedRoutes-8             2,193,810    571 ns/op    664 B/op    11 allocs/op
-BenchmarkRouteRegistration (100)-8      32,456 36.6 μs/op 36.1 kB/op     512 allocs/op
-BenchmarkConcurrentServe-8           2,611,944    373 ns/op    450 B/op     7 allocs/op
+BenchmarkStaticRoute-8               3,312,459    352 ns/op    450 B/op     7 allocs/op
+BenchmarkStaticRouteDeep-8           1,974,855    612 ns/op    720 B/op    11 allocs/op
+BenchmarkPathParams-8                1,369,901    893 ns/op   1448 B/op    18 allocs/op
+BenchmarkNotFound-8                  1,000,000  1,043 ns/op   1584 B/op    27 allocs/op
+BenchmarkCatchAll-8                  1,885,642    659 ns/op    688 B/op    17 allocs/op
+BenchmarkMultipleRoutes (1000)-8     1,985,503    599 ns/op    624 B/op    11 allocs/op
+BenchmarkBuild (1000 routes)-8             206  5.95 ms/op  4.67 MB/op    42k allocs/op
+BenchmarkMiddlewareChainDepth (10)-8 2,928,586    413 ns/op    450 B/op     7 allocs/op
+BenchmarkParamsExtraction-8          1,394,835    829 ns/op   1312 B/op    16 allocs/op
+BenchmarkGroupedRoutes-8             1,834,677    655 ns/op    664 B/op    11 allocs/op
+BenchmarkRouteRegistration (100)-8      33,114 36.4 μs/op 36.2 kB/op     513 allocs/op
+BenchmarkConcurrentServe-8             586,178  2.06 μs/op 5.74 kB/op      20 allocs/op
 ```
 
 ## Development

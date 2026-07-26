@@ -10,7 +10,6 @@ import (
 )
 
 func remap(mapRoute *routerImpl) []route {
-	keys := make(map[string]bool)
 	res := make([]route, 0)
 
 	mapRoutes := mapRoute.routes
@@ -25,20 +24,15 @@ func remap(mapRoute *routerImpl) []route {
 				pattern = fmt.Sprintf("%s%s", name, pattern)
 			}
 
-			key := fmt.Sprintf("%s-%s", pattern, router.method)
-			if _, exists := keys[key]; !exists {
-				keys[key] = true
-				middlewares := make([]MiddlewareFunc, 0)
-				middlewares = append(middlewares, mapRoute.middlewares...)
-				middlewares = append(middlewares, router.middlewares...)
-				res = append(res, route{
-					method:      router.method,
-					pattern:     pattern,
-					handler:     router.handler,
-					middlewares: middlewares,
-				})
-			}
-
+			middlewares := make([]MiddlewareFunc, 0)
+			middlewares = append(middlewares, mapRoute.middlewares...)
+			middlewares = append(middlewares, router.middlewares...)
+			res = append(res, route{
+				method:      router.method,
+				pattern:     pattern,
+				handler:     router.handler,
+				middlewares: middlewares,
+			})
 		}
 	}
 
@@ -79,6 +73,9 @@ func existsInStatic(uri_path, asset_path, asset_dir string, embedFS fs.FS) bool 
 	return err == nil
 }
 
+// Handle builds a middleware chain around the given handler.
+// Middleware order: the first middleware in the slice is the outermost wrapper.
+// If handler is nil, a default http.NewServeMux is used as the base.
 func Handle(handlers []MiddlewareFunc, handler http.Handler) http.Handler {
 	if handler == nil {
 		handler = http.NewServeMux()

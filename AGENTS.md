@@ -9,7 +9,7 @@ Lightweight Go HTTP router (`github.com/hrydi/simpleroute`). Go 1.24.4+ required
 - `make compose-run` — dev stack: mounts repo + starts Vite UI container.
 - `go build ./...` — compile everything.
 - `go vet ./...` — lint.
-- `go test ./...` — run all tests (33 tests + 12 benchmarks in `simpleroute_test.go` and `simpleroute_benchmark_test.go`).
+- `go test ./...` — run all tests (42 tests + 12 benchmarks in `simpleroute_test.go` and `simpleroute_benchmark_test.go`).
 
 ## Library entry points
 

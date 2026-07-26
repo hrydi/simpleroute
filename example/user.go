@@ -27,6 +27,8 @@ func (u *userImpl) Routes(r simpleroute.RouteRegister) {
 				fmt.Fprintf(w, "Hellooo")
 			})).
 			Get("/profile", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				log := simpleroute.GetLogger()
+				log.Infof("user profile page")
 
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
