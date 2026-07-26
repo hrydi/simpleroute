@@ -1,16 +1,22 @@
+---
+title: Configuration
+layout: default
+nav_order: 5
+---
+
 # Configuration
 
 ## RouterConfig
 
 ```go
 type RouterConfig struct {
-    AssetPath              string
-    AssetDir               string
-    FS                     fs.FS
-    BaseContext            context.Context
-    Logger                 Logger
-    LogLevel               LogLevel
-    NotFoundHandler        http.Handler
+    AssetPath               string
+    AssetDir                string
+    FS                      fs.FS
+    BaseContext             context.Context
+    Logger                  Logger
+    LogLevel                LogLevel
+    NotFoundHandler         http.Handler
     MethodNotAllowedHandler http.Handler
 }
 ```
@@ -19,12 +25,12 @@ type RouterConfig struct {
 |-------|------|-------------|
 | `AssetPath` | `string` | URL prefix for static assets (e.g., `/assets/`) |
 | `AssetDir` | `string` | Directory or embed path for static assets |
-| `FS` | `fs.FS` | Embedded filesystem (optional, uses `os.DirFS` when nil) |
-| `BaseContext` | `context.Context` | Parent context for all requests. Cancel → all in-flight requests cancelled |
-| `Logger` | `Logger` | Custom logger (defaults to `log.Printf` with `[simpleroute]` prefix) |
-| `LogLevel` | `LogLevel` | Minimum log level (`LogLevelError`, `LogLevelWarn`, `LogLevelInfo`, `LogLevelDebug`) |
-| `NotFoundHandler` | `http.Handler` | Custom handler for 404 responses |
-| `MethodNotAllowedHandler` | `http.Handler` | Custom handler for 405 responses |
+| `FS` | `fs.FS` | Embedded filesystem. Uses `os.DirFS(AssetDir)` when nil |
+| `BaseContext` | `context.Context` | Parent context for all requests. Cancel → all in-flight cancelled |
+| `Logger` | `Logger` | Custom logger (nil → `log.Printf` with `[simpleroute]` prefix) |
+| `LogLevel` | `LogLevel` | Minimum log level to emit (`LogLevelInfo` default) |
+| `NotFoundHandler` | `http.Handler` | Custom 404 handler (nil → `http.Error("page not found", 404)`) |
+| `MethodNotAllowedHandler` | `http.Handler` | Custom 405 handler (nil → `http.Error("method not allowed", 405)`) |
 
 ## ServerConfig
 
@@ -37,6 +43,8 @@ type ServerConfig struct {
 }
 ```
 
+Zero values are replaced with production defaults:
+
 ```go
 server := simpleroute.NewHttp(simpleroute.ServerConfig{
     Addr:         ":8080",
@@ -45,8 +53,6 @@ server := simpleroute.NewHttp(simpleroute.ServerConfig{
     IdleTimeout:  120 * time.Second,
 })
 ```
-
-Zero values are replaced with production defaults (10s read, 10s write, 60s idle).
 
 ## HttpServer Interface
 
@@ -58,38 +64,43 @@ type HttpServer interface {
 ```
 
 - `Start` wraps the router in `RecoverMiddleware` and calls `ListenAndServe`
-- `Start` returns `nil` on graceful shutdown (`http.ErrServerClosed` is filtered)
+- Returns `nil` on graceful shutdown (`http.ErrServerClosed` is filtered)
 - `Stop` delegates to `http.Server.Shutdown`
 
 ## Polymorphic Use
 
-The `Use` method accepts any combination of:
+`Use` accepts any combination of types in a single call:
 
-| Type | Behavior |
-|------|----------|
-| `HttpRouter` | Calls `Routes(r)` to register routes |
-| `string` | Method (e.g., `"GET"`) or URL pattern |
-| `http.Handler` | Final handler for the route |
-| `MiddlewareFunc` | Middleware wrapping the handler |
-| `[]MiddlewareFunc` | Batch middleware registration |
+| Type | Behavior | Example |
+|------|----------|---------|
+| `HttpRouter` | Calls `Routes(r)` to register routes | `NewUser()` |
+| `string` | HTTP method or URL pattern | `"GET"`, `"/api"` |
+| `http.Handler` | Final route handler | `myHandler` |
+| `MiddlewareFunc` | Middleware wrapping the handler | `authMiddleware` |
+| `[]MiddlewareFunc` | Batch middleware | `[]MiddlewareFunc{m1, m2}` |
 
-Example:
+Example — registers `GET /api` with the middleware chain:
 
 ```go
 router.Use(
-    simpleroute.RequestLogger,      // MiddlewareFunc (global)
-    NewUser(),                       // HttpRouter (registers routes)
-    "/api",                          // string pattern
-    authMiddleware,                  // MiddlewareFunc (route-level)
-    apiHandler,                      // http.Handler (final)
+    simpleroute.RequestLogger,  // global middleware
+    NewUser(),                   // HttpRouter — registers routes
+    "/api",                      // pattern
+    authMiddleware,              // route middleware
+    apiHandler,                  // final handler
 )
 ```
 
-This registers `GET /api` with `requestLogger → authMiddleware → apiHandler`.
+> Multiple `string` arguments: the first uppercase string is treated as the HTTP method, the rest as the path.
+
+---
 
 ## Benchmarks
 
 ```
+goos: linux
+goarch: amd64
+cpu: 11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz
 BenchmarkStaticRoute-8               3,582,957    340 ns/op    450 B/op     7 allocs/op
 BenchmarkStaticRouteDeep-8           2,096,168    578 ns/op    720 B/op    11 allocs/op
 BenchmarkPathParams-8                1,456,713    832 ns/op   1448 B/op    18 allocs/op

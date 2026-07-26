@@ -1,51 +1,52 @@
+---
+title: Middleware
+layout: default
+nav_order: 3
+---
+
 # Middleware
 
-## Order
+## Ordering
 
-Global router middlewares → group middlewares → route middlewares → handler.
+```
+global router middleware → group middleware → route middleware → handler
+```
 
-The first middleware is outermost in the chain:
+The first middleware registered is outermost in the chain:
 
 ```go
-router.Use(requestLogger)          // outermost
+router.Use(requestLogger)          // outermost (runs first, last to complete)
 router.Get("/data", handler, auth) // auth wraps handler
-// Request flow: requestLogger → auth → handler → auth → requestLogger
+// Request flow:  requestLogger → auth → handler → auth → requestLogger
 ```
 
 ## Registration
 
-```go
-// Global (applies to all routes)
-router.Use(middleware1, middleware2)
-
-// Route-level (applies to single route)
-router.Get("/data", middleware1, middleware2, handler)
-
-// Group-level (shared by all routes in group)
-router.Group("/api", func(r simpleroute.Router) simpleroute.Router {
-    return r.Get("/users", listUsers)
-}, groupMiddleware)
-```
+| Scope | Method | Example |
+|-------|--------|---------|
+| **Global** | `router.Use(mw)` | Applies to all routes |
+| **Route** | `router.Get("/x", mw, handler)` | Applies to single route |
+| **Group** | `router.Group("/x", fn, mw)` | Shared by all routes in group |
 
 ## Built-in Middleware
 
 ### RecoverMiddleware
 
-Catches panics and returns 500. Optionally logs the full stack trace:
+Catches panics and returns `500 Internal Server Error`. Optionally logs the full stack trace:
 
 ```go
-// Without stack trace
+// No stack trace
 router.Use(simpleroute.RecoverMiddleware)
 
-// With stack trace
+// With stack trace at ERROR level
 router.Use(simpleroute.RecoverMiddleware)
 ```
 
-`RecoverMiddleware` is automatically applied by `NewHttp`/`server.Start()`. Use it explicitly only for custom panic boundaries.
+> `RecoverMiddleware` is automatically applied by `NewHttp`/`server.Start()`. Use explicitly only for custom panic boundaries.
 
 ### RequestLogger
 
-Logs method, path, and duration. Accepts an optional logger:
+Logs HTTP method, path, and duration. Accepts an optional logger:
 
 ```go
 // Uses package-level logger
@@ -57,7 +58,7 @@ router.Use(simpleroute.RequestLogger(myLogger))
 
 ### CORS
 
-Configurable cross-origin support with preflight:
+Configurable cross-origin support with preflight handling:
 
 ```go
 router.Use("/api", simpleroute.CORS(simpleroute.CORSConfig{
@@ -70,7 +71,7 @@ router.Use("/api", simpleroute.CORS(simpleroute.CORSConfig{
 }))
 ```
 
-Preflight (OPTIONS) returns 204 without calling the next handler.
+Preflight (OPTIONS) returns `204 No Content` without calling the next handler.
 
 ### RequestID
 
@@ -80,11 +81,13 @@ Injects or preserves `X-Request-ID` in response headers and request context:
 router.Use(simpleroute.RequestID)
 ```
 
-Access the ID in handlers via:
+Access the ID in handlers:
 
 ```go
 id, ok := simpleroute.GetCtx[string](r, "request_id")
 ```
+
+Generates a unique ID from `time.Now().UnixNano()` when the incoming request has no `X-Request-ID` header.
 
 ### Gzip
 
@@ -96,7 +99,7 @@ router.Use(simpleroute.Gzip)
 
 ### RateLimiter
 
-Token bucket rate limiter. Returns 429 when exhausted:
+Token bucket rate limiter. Returns `429 Too Many Requests` when the limit is exceeded:
 
 ```go
 router.Use("/api", simpleroute.RateLimiter(simpleroute.RateLimiterConfig{
@@ -118,7 +121,9 @@ go func() {
     for range time.Tick(10 * time.Second) {
         snap := metrics.Snapshot()
         log.Printf("total=%d active=%d avg_ns=%d",
-            snap["total_requests"], snap["active_requests"], snap["avg_duration_ns"])
+            snap["total_requests"],
+            snap["active_requests"],
+            snap["avg_duration_ns"])
     }
 }()
 ```
@@ -156,12 +161,12 @@ func authMiddleware(next http.Handler) http.Handler {
 }
 ```
 
-For logging, use `GetLogger()` or pass a logger explicitly:
+For logging, use `GetLogger()` or capture a logger explicitly:
 
 ```go
 func myMiddleware(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        simpleroute.GetLogger().Infof("processing request")
+        simpleroute.GetLogger().Infof("processing %s %s", r.Method, r.URL.Path)
         next.ServeHTTP(w, r)
     })
 }

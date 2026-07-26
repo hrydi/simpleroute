@@ -1,3 +1,9 @@
+---
+title: Context & Logger
+layout: default
+nav_order: 4
+---
+
 # Context & Logger
 
 ## Base Context
@@ -11,15 +17,15 @@ router := simpleroute.NewRouter(simpleroute.RouterConfig{
     BaseContext: ctx,
 })
 
-// Later: cancel all in-flight requests
+// Cancel all in-flight requests
 cancel()
 ```
 
-Each request derives a new cancellable context from the base context (`defer cancel()` in `ServeHTTP`).
+Each request derives a new cancellable context from `BaseContext` via `context.WithCancel`. The `cancel()` function is deferred in `ServeHTTP`, so the derived context is always cleaned up.
 
 ## Request-Scoped Values
 
-Use `SetCtx` and `GetCtx[T]` for typed request-scoped values:
+Use `SetCtx` and `GetCtx[T]` for typed values:
 
 ```go
 func authMiddleware(next http.Handler) http.Handler {
@@ -42,6 +48,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 ```go
 r = simpleroute.SetCtx(simpleroute.SetCtx(r, "a", 1), "b", 2)
 ```
+
+`GetCtx[T]` is generic — the type parameter ensures type safety:
+
+```go
+val, ok := simpleroute.GetCtx[string](r, "key")
+```
+
+Returns the zero value and `false` if the key is missing or the type doesn't match.
 
 ## Path Parameters
 
@@ -66,8 +80,6 @@ type Logger interface {
 
 ### Configuration
 
-Set the logger and level via `RouterConfig`:
-
 ```go
 router := simpleroute.NewRouter(simpleroute.RouterConfig{
     Logger:   myLogger{},
@@ -75,17 +87,23 @@ router := simpleroute.NewRouter(simpleroute.RouterConfig{
 })
 ```
 
-Levels: `LogLevelError` (1) → `LogLevelWarn` (2) → `LogLevelInfo` (3, default) → `LogLevelDebug` (4).
+| Level | Constant | Value |
+|-------|----------|-------|
+| Error | `LogLevelError` | `1` |
+| Warn | `LogLevelWarn` | `2` |
+| Info | `LogLevelInfo` (default) | `3` |
+| Debug | `LogLevelDebug` | `4` |
 
 ### How It Works
 
-- `NewRouter` syncs the config logger to a package-level variable (`sync.RWMutex`-protected)
-- Built-in middleware (`RecoverMiddleware`, `RequestLogger`) read the logger safely at setup time
-- The logger is **not** injected into request context — no per-request allocations
+1. `NewRouter` calls `resolveLogger(config)` to create or select the logger
+2. When `config.Logger` is set, it syncs to a package-level variable (protected by `sync.RWMutex`)
+3. Built-in middleware reads the logger once at setup time and captures it by closure
+4. The logger is **never injected into request context** — zero per-request allocations
 
 ### GetLogger
 
-Use `GetLogger()` in custom middleware:
+Use in custom middleware:
 
 ```go
 func myMiddleware(next http.Handler) http.Handler {
@@ -96,15 +114,15 @@ func myMiddleware(next http.Handler) http.Handler {
 }
 ```
 
-### Explicit Logger (zero global dependency)
+### Explicit Logger (Zero Global Dependency)
 
-Pass a logger directly to `RequestLogger` to avoid the global entirely:
+Pass a logger directly to middleware to avoid the package-level variable entirely:
 
 ```go
 router.Use(simpleroute.RequestLogger(handler, myLogger))
 ```
 
-### Example with zerolog
+### Example: zerolog
 
 ```go
 type zeroLogger struct {
@@ -117,6 +135,10 @@ func (z *zeroLogger) Infof(format string, args ...any)  { z.l.Info().Msgf(format
 func (z *zeroLogger) Debugf(format string, args ...any) { z.l.Debug().Msgf(format, args...) }
 ```
 
-### Default
+### Default Logger
 
-When no logger is configured, output goes through `log.Printf` with `[simpleroute] [LEVEL]` prefix at `INFO` level.
+When no logger is configured, output goes through `log.Printf` with `[simpleroute] [LEVEL]` prefix at `INFO` level:
+
+```
+2026/07/26 12:34:56 [simpleroute] [INFO]  GET /hello 1.2ms
+```
