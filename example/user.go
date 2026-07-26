@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/hrydi/simpleroute"
@@ -14,7 +13,8 @@ type userImpl struct{}
 func helloMiddleware() simpleroute.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			log.Println("calling hello middleware")
+			log := simpleroute.GetLogger()
+			log.Infof("calling hello middleware")
 			next.ServeHTTP(w, r)
 		})
 	}

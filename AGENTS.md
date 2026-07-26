@@ -14,7 +14,7 @@ Lightweight Go HTTP router (`github.com/hrydi/simpleroute`). Go 1.24.4+ required
 ## Library entry points
 
 - `NewRouter(config RouterConfig)` → `*routerImpl`. Register routes, then call `.Build() error`.
-- `NewHttp(address)` → `*httpServerImpl`. `server.Start(router)` starts serving (router implements `http.Handler`).
+- `NewHttp(config ServerConfig)` → `*httpServerImpl`. `server.Start(router)` starts serving (router implements `http.Handler`).
 - `ServeHTTP` returns `500 "routes not initialize"` if `Build()` was not called first.
 
 ## Router API
