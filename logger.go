@@ -2,7 +2,6 @@ package simpleroute
 
 import (
 	"log"
-	"sync"
 )
 
 // LogLevel represents the minimum level a log message must have to be emitted.
@@ -53,11 +52,6 @@ func (l *defaultLogger) Debugf(format string, args ...any) {
 	}
 }
 
-var (
-	pkgLoggerMu sync.RWMutex
-	pkgLogger   Logger = &defaultLogger{level: LogLevelInfo}
-)
-
 func resolveLogger(config RouterConfig) Logger {
 	if config.Logger != nil {
 		return config.Logger
@@ -67,16 +61,4 @@ func resolveLogger(config RouterConfig) Logger {
 		level = LogLevelInfo
 	}
 	return &defaultLogger{level: level}
-}
-
-func getPkgLogger() Logger {
-	pkgLoggerMu.RLock()
-	defer pkgLoggerMu.RUnlock()
-	return pkgLogger
-}
-
-func setPkgLogger(l Logger) {
-	pkgLoggerMu.Lock()
-	pkgLogger = l
-	pkgLoggerMu.Unlock()
 }

@@ -129,8 +129,4 @@ func GetCtx[T any](r *http.Request, key any) (T, bool) {
 	return val, ok
 }
 
-// GetLogger returns the package-level logger, which is synced
-// from the most recently created router's RouterConfig.Logger.
-func GetLogger() Logger {
-	return getPkgLogger()
-}
+

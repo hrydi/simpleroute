@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -8,7 +9,6 @@ import (
 	"os"
 	"strings"
 	"syscall"
-	"fmt"
 
 	"github.com/hrydi/simpleroute"
 	"github.com/hrydi/simpleroute/example/ui"
@@ -82,9 +82,8 @@ func main() {
 				return
 			}
 			http.ServeFileFS(w, r, staticFS, "/index.html")
-	})
+		})
 
-	router.Use(NewUser())
 		router.Use("/", spa)
 	}
 

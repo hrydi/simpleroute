@@ -42,6 +42,7 @@ type Router interface {
 	Delete(path string, args ...any) Router
 	Head(path string, args ...any) Router
 	Mount(path string, sub http.Handler) Router
+	Logger() Logger
 }
 
 // RouteRegister extends Router with group and middleware registration.
@@ -117,6 +118,8 @@ func (r *routerImpl) Head(path string, args ...any) Router {
 	return r.Handle("HEAD", path, args...)
 }
 
+func (r *routerImpl) Logger() Logger { return r.log }
+
 // Mount attaches a sub-handler under the given path prefix.
 // All requests to path/* are forwarded to the sub-handler.
 func (r *routerImpl) Mount(path string, sub http.Handler) Router {
@@ -155,6 +158,8 @@ func (r *routerImpl) Group(path string, args ...any) Router {
 		group:       path,
 		routes:      make(map[string][]route),
 		middlewares: middlewares,
+		config:      r.config,
+		log:         r.log,
 	}
 
 	r.groups[path] = callbackRoute(router)
@@ -475,9 +480,6 @@ func (r *routerImpl) matchPath(pattern, path string) ([]Param, bool) {
 // NewRouter creates a new router with the given configuration.
 func NewRouter(config RouterConfig) *routerImpl {
 	l := resolveLogger(config)
-	if config.Logger != nil {
-		setPkgLogger(l)
-	}
 	return &routerImpl{
 		config:      config,
 		log:         l,

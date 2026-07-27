@@ -21,7 +21,7 @@ Lightweight, zero-dependency HTTP router for Go 1.24+.
 - **Subtree mount** — `router.Mount("/prefix", subHandler)` for all methods
 - **Query helpers** — `Query`, `QueryInt`, `QueryFloat`, `QueryBool` with defaults
 - **Response helpers** — `JSON`, `WriteError`, `Text`
-- **Concurrent-safe** — `sync.Once` build, no per-request locks, `sync.RWMutex`-protected logger
+- **Concurrent-safe** — `sync.Once` build, no per-request locks, per-router logger
 - **Production-ready server** — configurable timeouts (10s read, 10s write, 60s idle by default)
 
 ## Installation
@@ -74,6 +74,7 @@ func main() {
 | `Patch(path, args...)` | Register PATCH handler |
 | `Delete(path, args...)` | Register DELETE handler |
 | `Head(path, args...)` | Register HEAD handler |
+| `Logger()` | Return the router's Logger instance |
 
 ### RouteRegister
 
@@ -113,7 +114,7 @@ func main() {
 | `QueryInt(r, key, default)` | Get query parameter as int |
 | `QueryFloat(r, key, default)` | Get query parameter as float64 |
 | `QueryBool(r, key, default)` | Get query parameter as bool |
-| `GetLogger()` | Return the package-level logger |
+
 
 ### Server
 
@@ -161,7 +162,7 @@ id := simpleroute.Params(r)["id"]
 
 ## Pluggable Logger
 
-Set the logger once via `RouterConfig` — it applies to both router internals and middleware:
+Set the logger once via `RouterConfig` — it applies to both router internals and custom middleware:
 
 ```go
 r := simpleroute.NewRouter(simpleroute.RouterConfig{
@@ -172,18 +173,13 @@ r := simpleroute.NewRouter(simpleroute.RouterConfig{
 
 Levels: `LogLevelError` → `LogLevelWarn` → `LogLevelInfo` (default) → `LogLevelDebug`.
 
-The package-level logger is concurrent-safe (`sync.RWMutex`). `NewRouter` syncs the config logger to the package level, and middleware (`RecoverMiddleware`, `RequestLogger`) either close over the logger or read it safely. Custom middleware can use `GetLogger()`:
+Access the logger from any code that holds a `Router`:
 
 ```go
-func myMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        simpleroute.GetLogger().Infof("my middleware")
-        next.ServeHTTP(w, r)
-    })
-}
+router.Logger().Infof("handling request")
 ```
 
-For per-middleware control, pass a logger explicitly:
+The `RequestLogger` middleware accepts an optional logger parameter:
 
 ```go
 router.Use(simpleroute.RequestLogger(handler, myLogger))
@@ -232,6 +228,7 @@ Group routes under a common prefix with optional shared middleware:
 
 ```go
 router.Group("/api", func(router simpleroute.Router) simpleroute.Router {
+    router.Logger().Infof("setting up /api routes")
     return router.
         Get("/users", listUsers).
         Post("/users", createUser)
@@ -409,7 +406,7 @@ Full docs are in [`docs/`](docs/index.md):
 | [Getting Started](docs/getting-started.md) | Install, quick start, lifecycle |
 | [Routing](docs/routing.md) | Methods, path params, groups, mount, static files, HEAD auto-routing, custom 404/405 |
 | [Middleware](docs/middleware.md) | Built-in middleware, custom middleware, ordering |
-| [Context & Logger](docs/context-logger.md) | Base context, SetCtx/GetCtx, Params, logger interface, GetLogger |
+| [Context & Logger](docs/context-logger.md) | Base context, SetCtx/GetCtx, Params, logger interface |
 | [Configuration](docs/configuration.md) | RouterConfig, ServerConfig, polymorphic Use, benchmarks |
 
 ## License

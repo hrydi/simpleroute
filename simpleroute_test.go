@@ -835,29 +835,6 @@ var h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "ok")
 })
 
-type nopLogger struct{}
-
-func (nopLogger) Errorf(string, ...any) {}
-func (nopLogger) Warnf(string, ...any)  {}
-func (nopLogger) Infof(string, ...any)  {}
-func (nopLogger) Debugf(string, ...any) {}
-
-func TestParallelLoggerRace(t *testing.T) {
-	t.Parallel()
-	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_ = NewRouter(RouterConfig{
-				Logger: nopLogger{},
-			})
-			_ = GetLogger()
-		}()
-	}
-	wg.Wait()
-}
-
 func TestRateLimiterAllowsRequestsWithinBurst(t *testing.T) {
 	t.Parallel()
 	handler := RateLimiter(RateLimiterConfig{

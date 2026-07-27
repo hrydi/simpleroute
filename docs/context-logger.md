@@ -104,27 +104,32 @@ router := simpleroute.NewRouter(simpleroute.RouterConfig{
 
 ### How It Works
 
-1. `NewRouter` calls `resolveLogger(config)` to create or select the logger
-2. When `config.Logger` is set, it syncs to a package-level variable (protected by `sync.RWMutex`)
-3. Built-in middleware reads the logger once at setup time and captures it by closure
-4. The logger is **never injected into request context** — zero per-request allocations
+`NewRouter` calls `resolveLogger(config)` to create or select the logger. The logger is held by the router instance and used for internal errors, debug messages, and accessible via the `Router` interface.
 
-### GetLogger
+### Accessing the Logger
 
-Use in custom middleware:
+The `Router` interface exposes the logger directly — no context injection, no global state:
 
 ```go
-func myMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        simpleroute.GetLogger().Infof("handling %s %s", r.Method, r.URL.Path)
-        next.ServeHTTP(w, r)
-    })
+// Inside a Group callback:
+router.Group("/api", func(router simpleroute.Router) simpleroute.Router {
+    router.Logger().Infof("registering /api routes")
+    return router.
+        Get("/health", healthHandler)
+})
+
+// Inside an HttpRouter.Routes method:
+func (u *userImpl) Routes(r simpleroute.RouteRegister) {
+    r.Logger().Debugf("user routes registered")
+    // ...
 }
 ```
 
-### Explicit Logger (Zero Global Dependency)
+This is the idiomatic way to access the router's logger from middleware factories or handlers that have access to a `Router` value.
 
-Pass a logger directly to middleware to avoid the package-level variable entirely:
+### Explicit Logger
+
+Pass a logger directly to `RequestLogger`:
 
 ```go
 router.Use(simpleroute.RequestLogger(handler, myLogger))

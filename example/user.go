@@ -10,11 +10,10 @@ import (
 
 type userImpl struct{}
 
-func helloMiddleware() simpleroute.MiddlewareFunc {
+func helloMiddleware(logger simpleroute.Logger) simpleroute.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			log := simpleroute.GetLogger()
-			log.Infof("calling hello middleware")
+			logger.Infof("[simpleroute] [INFO]  calling hello middleware")
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -23,12 +22,11 @@ func helloMiddleware() simpleroute.MiddlewareFunc {
 func (u *userImpl) Routes(r simpleroute.RouteRegister) {
 	r.Group("/user", func(router simpleroute.Router) simpleroute.Router {
 		return router.
-			Get("/", helloMiddleware(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			Get("/", helloMiddleware(router.Logger()), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "Hellooo")
 			})).
 			Get("/profile", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				log := simpleroute.GetLogger()
-				log.Infof("user profile page")
+				router.Logger().Infof("user profile page")
 
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)

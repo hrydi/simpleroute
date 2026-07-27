@@ -161,13 +161,4 @@ func authMiddleware(next http.Handler) http.Handler {
 }
 ```
 
-For logging, use `GetLogger()` or capture a logger explicitly:
-
-```go
-func myMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        simpleroute.GetLogger().Infof("processing %s %s", r.Method, r.URL.Path)
-        next.ServeHTTP(w, r)
-    })
-}
-```
+For logging, use the router's logger via `Router.Logger()`, pass a logger explicitly to `RequestLogger`, or use `log.Printf` directly.

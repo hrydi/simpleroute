@@ -16,6 +16,7 @@ nav_order: 2
 | `Patch` | `Patch(path string, args ...any)` | `router.Patch("/users/{id}", handler)` |
 | `Delete` | `Delete(path string, args ...any)` | `router.Delete("/users/{id}", handler)` |
 | `Head` | `Head(path string, args ...any)` | `router.Head("/health", handler)` |
+| `Logger` | `Logger() Logger` | `router.Logger().Infof("...")` |
 
 Each method accepts optional middleware as trailing arguments:
 
@@ -64,7 +65,7 @@ router.Group("/api", func(router simpleroute.Router) simpleroute.Router {
 }, authMiddleware, loggerMiddleware)
 ```
 
-The callback receives a `Router` (no `Use` method). Group middleware is passed as extra arguments after the callback.
+The callback receives a `Router` (no `Use` method). Group middleware is passed as extra arguments after the callback. The `Router.Logger()` method is available inside the callback for logging.
 
 ## Subtree Mount
 

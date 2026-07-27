@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"runtime"
 	"strings"
@@ -40,13 +41,12 @@ func RecoverMiddleware(next http.Handler, stackTrace ...bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				l := getPkgLogger()
 				if withStack {
 					buf := make([]byte, 4096)
 					n := runtime.Stack(buf, false)
-					l.Errorf("recover from panic %v\n%s", err, buf[:n])
+					log.Printf("[simpleroute] [ERROR] recover from panic %v\n%s", err, buf[:n])
 				} else {
-					l.Errorf("recover from panic %v", err)
+					log.Printf("[simpleroute] [ERROR] recover from panic %v", err)
 				}
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			}
@@ -118,16 +118,20 @@ func CORS(config CORSConfig) func(http.Handler) http.Handler {
 }
 
 // RequestLogger logs the HTTP method, path, and duration of each request.
-// An optional logger can be provided; otherwise the package-level logger is used.
+// An optional logger can be provided; otherwise uses standard log output.
 func RequestLogger(next http.Handler, logger ...Logger) http.Handler {
-	l := getPkgLogger()
+	var l Logger
 	if len(logger) > 0 && logger[0] != nil {
 		l = logger[0]
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		l.Infof("%s %s %s", r.Method, r.URL.Path, time.Since(start))
+		if l != nil {
+			l.Infof("%s %s %s", r.Method, r.URL.Path, time.Since(start))
+		} else {
+			log.Printf("[simpleroute] [INFO]  %s %s %s", r.Method, r.URL.Path, time.Since(start))
+		}
 	})
 }
 
