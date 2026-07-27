@@ -356,6 +356,28 @@ func (r *routerImpl) matchMethod(mh route, res http.ResponseWriter, req *http.Re
 	return res, false
 }
 
+// statusWriter wraps http.ResponseWriter to default to the given status
+// code if the handler writes a response without calling WriteHeader.
+type statusWriter struct {
+	http.ResponseWriter
+	code        int
+	wroteHeader bool
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.wroteHeader = true
+		w.ResponseWriter.WriteHeader(code)
+	}
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(w.code)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
 func (r *routerImpl) writeMethodNotAllowed(res http.ResponseWriter, req *http.Request, pattern string) {
 	methods := r.allowMethods[pattern]
 	if len(methods) > 0 {
@@ -366,7 +388,8 @@ func (r *routerImpl) writeMethodNotAllowed(res http.ResponseWriter, req *http.Re
 		return
 	}
 	if r.config.MethodNotAllowedHandler != nil {
-		r.config.MethodNotAllowedHandler.ServeHTTP(res, req)
+		nw := &statusWriter{ResponseWriter: res, code: http.StatusMethodNotAllowed}
+		r.config.MethodNotAllowedHandler.ServeHTTP(nw, req)
 		return
 	}
 	http.Error(res, "method not allowed", http.StatusMethodNotAllowed)
@@ -374,7 +397,8 @@ func (r *routerImpl) writeMethodNotAllowed(res http.ResponseWriter, req *http.Re
 
 func (r *routerImpl) writeNotFound(res http.ResponseWriter, req *http.Request) {
 	if r.config.NotFoundHandler != nil {
-		r.config.NotFoundHandler.ServeHTTP(res, req)
+		nw := &statusWriter{ResponseWriter: res, code: http.StatusNotFound}
+		r.config.NotFoundHandler.ServeHTTP(nw, req)
 		return
 	}
 	http.Error(res, "page not found", http.StatusNotFound)

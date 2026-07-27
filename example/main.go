@@ -59,6 +59,11 @@ func main() {
 		FS:        ui.UIStaticFS,
 		Logger:    appLogger{},
 		LogLevel:  simpleroute.LogLevelDebug,
+		NotFoundHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			message := "The page that you're requester was not found"
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(message))
+		}),
 	})
 
 	if os.Getenv("DEV") == "development" {
