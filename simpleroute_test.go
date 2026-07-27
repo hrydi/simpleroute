@@ -858,6 +858,91 @@ func TestParallelLoggerRace(t *testing.T) {
 	wg.Wait()
 }
 
+func TestRateLimiterAllowsRequestsWithinBurst(t *testing.T) {
+	t.Parallel()
+	handler := RateLimiter(RateLimiterConfig{
+		RequestsPerSecond: 0,
+		Burst:             3,
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for i := 0; i < 3; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/", nil)
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("request %d: expected 200, got %d", i+1, rec.Code)
+		}
+	}
+}
+
+func TestRateLimiterBlocksExcessRequests(t *testing.T) {
+	t.Parallel()
+	handler := RateLimiter(RateLimiterConfig{
+		RequestsPerSecond: 0,
+		Burst:             2,
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/", nil)
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("request %d: expected 200, got %d", i+1, rec.Code)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", rec.Code)
+	}
+}
+
+func TestRateLimiterZeroBurstFallsBack(t *testing.T) {
+	t.Parallel()
+	handler := RateLimiter(RateLimiterConfig{
+		RequestsPerSecond: 5,
+		Burst:             0,
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for i := 0; i < 5; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/", nil)
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("request %d: expected 200, got %d", i+1, rec.Code)
+		}
+	}
+}
+
+func TestRateLimiterAllZeroDefaultsToOne(t *testing.T) {
+	t.Parallel()
+	handler := RateLimiter(RateLimiterConfig{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", rec.Code)
+	}
+}
+
 type httpRouterFunc func(RouteRegister)
 
 func (f httpRouterFunc) Routes(r RouteRegister) { f(r) }

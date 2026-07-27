@@ -59,11 +59,19 @@ Returns the zero value and `false` if the key is missing or the type doesn't mat
 
 ## Path Parameters
 
+Access path parameters as a map:
+
 ```go
 id := simpleroute.Params(r)["id"]
 ```
 
-Returns `nil` if no parameters were matched.
+Or with zero-alloc single-parameter access:
+
+```go
+id := simpleroute.URLParam(r, "id")
+```
+
+> `Params(r)` returns `nil` when no parameters are matched. `URLParam` returns an empty string.
 
 ## Logger
 

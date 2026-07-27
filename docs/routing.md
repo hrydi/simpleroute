@@ -43,7 +43,13 @@ router.Get("/files/{dir}/{name}", http.HandlerFunc(func(w http.ResponseWriter, r
 }))
 ```
 
-> `Params(r)` returns `nil` when no parameters are matched.
+For a single parameter, `URLParam` provides zero-alloc access:
+
+```go
+id := simpleroute.URLParam(r, "id")
+```
+
+> `Params(r)` returns `nil` when no parameters are matched. `URLParam` returns an empty string.
 
 ## Route Groups
 

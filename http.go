@@ -77,11 +77,30 @@ func NewHttp(config ServerConfig) *httpServerImpl {
 
 var _ HttpServer = (*httpServerImpl)(nil)
 
-// Params extracts path parameters from the request context.
+// Params extracts all path parameters from the request context as a map.
 // Returns nil if no parameters were matched.
 func Params(r *http.Request) map[string]string {
-	params, _ := r.Context().Value(ParamsContextKey).(map[string]string)
-	return params
+	params, _ := r.Context().Value(ParamsContextKey).([]Param)
+	if params == nil {
+		return nil
+	}
+	m := make(map[string]string, len(params))
+	for _, p := range params {
+		m[p.Key] = p.Value
+	}
+	return m
+}
+
+// URLParam returns the value of a single path parameter by name.
+// Returns empty string if the parameter is not found.
+func URLParam(r *http.Request, key string) string {
+	params, _ := r.Context().Value(ParamsContextKey).([]Param)
+	for _, p := range params {
+		if p.Key == key {
+			return p.Value
+		}
+	}
+	return ""
 }
 
 // JSON writes data as JSON with the given status code.

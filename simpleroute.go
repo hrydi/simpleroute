@@ -63,12 +63,18 @@ type ContextKey string
 // ParamsContextKey is the context key for path parameters.
 const ParamsContextKey ContextKey = "route_params"
 
+type segment struct {
+	isParam bool
+	val     string
+}
+
 type route struct {
 	method      string
 	pattern     string
 	handler     http.Handler
 	middlewares []MiddlewareFunc
 	wrapped     http.Handler
+	segments    []segment
 }
 
 type routerImpl struct {
@@ -210,9 +216,7 @@ func (h *headResponseWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// ServeHTTP implements http.Handler. It matches the request against registered patterns
-// and path parameters, injects matched parameters into the context, and dispatches
-// to the wrapped handler (with middleware). Returns 500 if Build() was not called.
+// ServeHTTP implements http.Handler. Returns 500 if Build() was not called.
 func (r *routerImpl) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	if !r.built {
 		r.log.Errorf("routes not initialized")
@@ -230,64 +234,83 @@ func (r *routerImpl) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 		res = &headResponseWriter{ResponseWriter: res}
 	}
 
-	_, pattern := r.mux.Handler(req)
-	patterns := strings.Split(pattern, " ")
-
-	if len(patterns) == 2 {
-		pathPattern := patterns[1]
-		if strings.HasSuffix(pathPattern, "/") {
-			if pathPattern == "/" {
-				// Root catch-all — check parameterized routes first
-				for _, mh := range r.routeHandlers {
-					params, ok := r.matchPath(mh.pattern, req.URL.Path)
-					if !ok {
-						continue
-					}
-					rw, ok := r.matchMethod(mh, res, req)
-					if !ok {
-						return
-					}
-					if len(params) > 0 {
-						ctx := context.WithValue(req.Context(), ParamsContextKey, params)
-						req = req.WithContext(ctx)
-					}
-					mh.wrapped.ServeHTTP(rw, req)
-					return
-				}
-			}
-			r.mux.ServeHTTP(res, req)
-			return
-		}
-		if params, ok := r.matchPath(pathPattern, req.URL.Path); ok {
-			if len(params) > 0 {
-				ctx := context.WithValue(req.Context(), ParamsContextKey, params)
-				req = req.WithContext(ctx)
-			}
-			r.mux.ServeHTTP(res, req)
-			return
-		}
-		r.writeNotFound(res, req)
+	if r.dispatchMuxRoute(res, req) {
 		return
 	}
 
 	for _, mh := range r.routeHandlers {
-		params, ok := r.matchPath(mh.pattern, req.URL.Path)
-		if !ok {
-			continue
-		}
-		rw, ok := r.matchMethod(mh, res, req)
-		if !ok {
+		if r.tryRoute(mh, res, req) {
 			return
 		}
+	}
+
+	r.writeNotFound(res, req)
+}
+
+// dispatchMuxRoute attempts to dispatch via mux.Handler pattern routing.
+// Returns true if the request was handled (or a response was written).
+func (r *routerImpl) dispatchMuxRoute(res http.ResponseWriter, req *http.Request) bool {
+	muxHandler, pattern := r.mux.Handler(req)
+	patterns := strings.Split(pattern, " ")
+	if len(patterns) != 2 {
+		return false
+	}
+
+	pathPattern := patterns[1]
+	if strings.HasSuffix(pathPattern, "/") {
+		if pathPattern == "/" {
+			for _, mh := range r.routeHandlers {
+				if r.tryRoute(mh, res, req) {
+					return true
+				}
+			}
+		}
+		muxHandler.ServeHTTP(res, req)
+		return true
+	}
+
+	if !strings.ContainsRune(pathPattern, '{') {
+		muxHandler.ServeHTTP(res, req)
+		return true
+	}
+
+	if params, ok := r.matchPath(pathPattern, req.URL.Path); ok {
 		if len(params) > 0 {
 			ctx := context.WithValue(req.Context(), ParamsContextKey, params)
 			req = req.WithContext(ctx)
 		}
-		mh.wrapped.ServeHTTP(rw, req)
-		return
+		muxHandler.ServeHTTP(res, req)
+		return true
 	}
 
 	r.writeNotFound(res, req)
+	return true
+}
+
+// tryRoute attempts to match and dispatch a single parameterized route.
+// Returns true if the route matched (regardless of whether it was dispatched
+// or rejected with a method-not-allowed response).
+func (r *routerImpl) tryRoute(mh route, res http.ResponseWriter, req *http.Request) bool {
+	var params []Param
+	var ok bool
+	if mh.segments != nil && r.config.AssetPath == "" {
+		params, ok = matchRoute(mh.segments, req.URL.Path)
+	} else {
+		params, ok = r.matchPath(mh.pattern, req.URL.Path)
+	}
+	if !ok {
+		return false
+	}
+	rw, ok := r.matchMethod(mh, res, req)
+	if !ok {
+		return true
+	}
+	if len(params) > 0 {
+		ctx := context.WithValue(req.Context(), ParamsContextKey, params)
+		req = req.WithContext(ctx)
+	}
+	mh.wrapped.ServeHTTP(rw, req)
+	return true
 }
 
 // matchMethod checks whether the request method matches the route.
@@ -373,17 +396,13 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route, error) {
 	var allRoutes []route
 	seen := make(map[string]bool)
 
-	rootRoutes := remap(r)
-	for _, rt := range rootRoutes {
-		pat := fmt.Sprintf("%s %s", rt.method, rt.pattern)
-		if seen[pat] {
-			return nil, nil, fmt.Errorf("route conflict: %s", pat)
+	for _, routes := range r.routes {
+		for _, rt := range routes {
+			mws := chainMiddleware(r.middlewares, rt.middlewares)
+			if err := r.registerRoute(mux, seen, &allRoutes, rt, mws); err != nil {
+				return nil, nil, err
+			}
 		}
-		seen[pat] = true
-		wrapped := Handle(rt.middlewares, rt.handler)
-		rt.wrapped = wrapped
-		mux.Handle(pat, wrapped)
-		allRoutes = append(allRoutes, rt)
 	}
 
 	for _, group := range r.groups {
@@ -392,24 +411,26 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route, error) {
 			continue
 		}
 
-		for _, rt := range remap(g) {
-			var handlers []MiddlewareFunc
-			handlers = append(handlers, r.middlewares...)
-			handlers = append(handlers, rt.middlewares...)
-			pat := fmt.Sprintf("%s %s", rt.method, rt.pattern)
-			if seen[pat] {
-				return nil, nil, fmt.Errorf("route conflict: %s", pat)
+		for _, routes := range g.routes {
+			for _, rt := range routes {
+				pattern := rt.pattern
+				if g.group != "" {
+					if pattern == "/" {
+						pattern = ""
+					}
+					pattern = g.group + pattern
+				}
+
+				mws := chainMiddleware(r.middlewares, g.middlewares, rt.middlewares)
+				grt := route{
+					method:  rt.method,
+					pattern: pattern,
+					handler: rt.handler,
+				}
+				if err := r.registerRoute(mux, seen, &allRoutes, grt, mws); err != nil {
+					return nil, nil, err
+				}
 			}
-			seen[pat] = true
-			wrapped := Handle(handlers, rt.handler)
-			mux.Handle(pat, wrapped)
-			allRoutes = append(allRoutes, route{
-				method:      rt.method,
-				pattern:     rt.pattern,
-				handler:     rt.handler,
-				middlewares: handlers,
-				wrapped:     wrapped,
-			})
 		}
 	}
 
@@ -425,8 +446,27 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route, error) {
 	return mux, allRoutes, nil
 }
 
-func (r *routerImpl) matchPath(pattern, path string) (map[string]string, bool) {
-	if strings.Contains(pattern, r.config.AssetPath) && existsInStatic(path, r.config.AssetPath, r.config.AssetDir, r.config.FS) {
+func (r *routerImpl) registerRoute(mux *http.ServeMux, seen map[string]bool, allRoutes *[]route, rt route, middlewares []MiddlewareFunc) error {
+	pat := fmt.Sprintf("%s %s", rt.method, rt.pattern)
+	if seen[pat] {
+		return fmt.Errorf("route conflict: %s", pat)
+	}
+	seen[pat] = true
+	wrapped := Handle(middlewares, rt.handler)
+	mux.Handle(pat, wrapped)
+	*allRoutes = append(*allRoutes, route{
+		method:      rt.method,
+		pattern:     rt.pattern,
+		handler:     rt.handler,
+		middlewares: middlewares,
+		wrapped:     wrapped,
+		segments:    parseSegments(rt.pattern),
+	})
+	return nil
+}
+
+func (r *routerImpl) matchPath(pattern, path string) ([]Param, bool) {
+	if r.config.AssetPath != "" && strings.Contains(pattern, r.config.AssetPath) && existsInStatic(path, r.config.AssetPath, r.config.AssetDir, r.config.FS) {
 		return nil, true
 	}
 	return matchPath(pattern, path)

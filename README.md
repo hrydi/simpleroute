@@ -101,7 +101,8 @@ func main() {
 
 | Function | Description |
 |----------|-------------|
-| `Params(r) map[string]string` | Extract path parameters from context |
+| `Params(r) map[string]string` | Extract path parameters from context as a map |
+| `URLParam(r, key) string` | Extract a single path parameter by name (zero-alloc) |
 | `JSON(w, code, data)` | Write JSON response with content-type |
 | `WriteError(w, code, msg)` | Write plain-text error response |
 | `Text(w, code, msg)` | Write plain-text response |
@@ -369,18 +370,18 @@ server.Stop(ctx)  // graceful shutdown
 goos: linux
 goarch: amd64
 cpu: 11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz
-BenchmarkStaticRoute-8               3,582,957    340 ns/op    450 B/op     7 allocs/op
-BenchmarkStaticRouteDeep-8           2,096,168    578 ns/op    720 B/op    11 allocs/op
-BenchmarkPathParams-8                1,456,713    832 ns/op   1448 B/op    18 allocs/op
-BenchmarkNotFound-8                  1,245,278    993 ns/op   1584 B/op    27 allocs/op
-BenchmarkCatchAll-8                  1,926,688    593 ns/op    688 B/op    17 allocs/op
-BenchmarkMultipleRoutes-8            2,110,357    529 ns/op    624 B/op    11 allocs/op
-BenchmarkBuild-8                           222  5.42 ms/op  4.59 MB/op    38k allocs/op
-BenchmarkMiddlewareChainDepth-8      3,263,679    372 ns/op    450 B/op     7 allocs/op
-BenchmarkParamsExtraction-8          1,740,031    726 ns/op   1312 B/op    16 allocs/op
-BenchmarkGroupedRoutes-8             1,862,180    633 ns/op    664 B/op    11 allocs/op
-BenchmarkRouteRegistration-8            28,404 36.3 μs/op 36.2 kB/op     513 allocs/op
-BenchmarkConcurrentServe-8             705,944  1.69 μs/op 5.74 kB/op      20 allocs/op
+BenchmarkStaticRoute-8              10,124,955    127 ns/op    242 B/op     5 allocs/op
+BenchmarkStaticRouteDeep-8           8,391,156    151 ns/op    240 B/op     5 allocs/op
+BenchmarkPathParams-8                3,818,419    404 ns/op    776 B/op    12 allocs/op
+BenchmarkNotFound-8                  2,643,332    589 ns/op   1234 B/op    21 allocs/op
+BenchmarkCatchAll-8                  4,942,819    260 ns/op    288 B/op     8 allocs/op
+BenchmarkMultipleRoutes-8            5,115,830    282 ns/op    240 B/op     5 allocs/op
+BenchmarkBuild-8                           222  5.71 ms/op  4.48 MB/op    40k allocs/op
+BenchmarkMiddlewareChainDepth-8      8,036,977    161 ns/op    240 B/op     5 allocs/op
+BenchmarkParamsExtraction-8          3,903,521    423 ns/op   1016 B/op    12 allocs/op
+BenchmarkGroupedRoutes-8             8,266,606    149 ns/op    240 B/op     5 allocs/op
+BenchmarkRouteRegistration-8            28,312 36.3 μs/op 44.3 kB/op     513 allocs/op
+BenchmarkConcurrentServe-8             730,724  1.73 μs/op 5.35 kB/op      14 allocs/op
 ```
 
 ## Development

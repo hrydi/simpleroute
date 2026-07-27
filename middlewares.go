@@ -181,18 +181,15 @@ type RateLimiterConfig struct {
 // bucket algorithm. It returns 429 Too Many Requests when the limit is exceeded.
 func RateLimiter(config RateLimiterConfig) func(http.Handler) http.Handler {
 	var mu sync.Mutex
-	tokens := float64(config.Burst)
 	lastRefill := time.Now()
 	maxTokens := float64(config.Burst)
 	if maxTokens <= 0 {
-		maxTokens = 1
-	}
-	if tokens <= 0 {
-		tokens = maxTokens
-	}
-	if maxTokens <= 0 {
 		maxTokens = float64(config.RequestsPerSecond)
 	}
+	if maxTokens <= 0 {
+		maxTokens = 1
+	}
+	tokens := maxTokens
 	rate := float64(config.RequestsPerSecond)
 
 	return func(next http.Handler) http.Handler {

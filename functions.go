@@ -1,7 +1,6 @@
 package simpleroute
 
 import (
-	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -9,54 +8,121 @@ import (
 	"strings"
 )
 
-func remap(mapRoute *routerImpl) []route {
-	res := make([]route, 0)
-
-	mapRoutes := mapRoute.routes
-	for name, routes := range mapRoutes {
-		for _, router := range routes {
-			pattern := router.pattern
-			if name != "" {
-				if pattern == "/" {
-					pattern = ""
-				}
-
-				pattern = fmt.Sprintf("%s%s", name, pattern)
-			}
-
-			middlewares := make([]MiddlewareFunc, 0)
-			middlewares = append(middlewares, mapRoute.middlewares...)
-			middlewares = append(middlewares, router.middlewares...)
-			res = append(res, route{
-				method:      router.method,
-				pattern:     pattern,
-				handler:     router.handler,
-				middlewares: middlewares,
-			})
-		}
-	}
-
-	return res
+// Param represents a single key-value path parameter.
+type Param struct {
+	Key   string
+	Value string
 }
 
-func matchPath(pattern, path string) (map[string]string, bool) {
-	pSegs := strings.Split(strings.Trim(pattern, "/"), "/")
-	pathSegs := strings.Split(strings.Trim(path, "/"), "/")
-
-	if len(pSegs) != len(pathSegs) {
-		return nil, false
+func parseSegments(pattern string) []segment {
+	segs := make([]segment, 0, 4)
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] == '/' {
+			continue
+		}
+		start := i
+		for i < len(pattern) && pattern[i] != '/' {
+			i++
+		}
+		s := pattern[start:i]
+		if len(s) >= 3 && s[0] == '{' && s[len(s)-1] == '}' {
+			segs = append(segs, segment{isParam: true, val: s[1 : len(s)-1]})
+		} else {
+			segs = append(segs, segment{isParam: false, val: s})
+		}
 	}
+	return segs
+}
 
-	params := make(map[string]string)
-	for i := range pSegs {
-		if strings.HasPrefix(pSegs[i], "{") && strings.HasSuffix(pSegs[i], "}") {
-			key := pSegs[i][1 : len(pSegs[i])-1]
-			params[key] = pathSegs[i]
-		} else if pSegs[i] != pathSegs[i] {
+func matchRoute(segs []segment, path string) ([]Param, bool) {
+	var params []Param
+	ppi := 0
+	ppl := len(path)
+
+	for si := 0; si < len(segs); si++ {
+		for ppi < ppl && path[ppi] == '/' {
+			ppi++
+		}
+		if ppi >= ppl {
+			return nil, false
+		}
+
+		uStart := ppi
+		for ppi < ppl && path[ppi] != '/' {
+			ppi++
+		}
+		uSeg := path[uStart:ppi]
+
+		if segs[si].isParam {
+			params = append(params, Param{segs[si].val, uSeg})
+		} else if segs[si].val != uSeg {
 			return nil, false
 		}
 	}
+
+	for ppi < ppl && path[ppi] == '/' {
+		ppi++
+	}
+	if ppi < ppl {
+		return nil, false
+	}
+
 	return params, true
+}
+
+func chainMiddleware(slices ...[]MiddlewareFunc) []MiddlewareFunc {
+	n := 0
+	for _, s := range slices {
+		n += len(s)
+	}
+	mws := make([]MiddlewareFunc, 0, n)
+	for _, s := range slices {
+		mws = append(mws, s...)
+	}
+	return mws
+}
+
+func matchPath(pattern, path string) ([]Param, bool) {
+	pi := 0
+	ppi := 0
+	pl := len(pattern)
+	ppl := len(path)
+
+	var params []Param
+
+	for {
+		for pi < pl && pattern[pi] == '/' {
+			pi++
+		}
+		for ppi < ppl && path[ppi] == '/' {
+			ppi++
+		}
+
+		if pi >= pl && ppi >= ppl {
+			return params, true
+		}
+		if pi >= pl || ppi >= ppl {
+			return nil, false
+		}
+
+		pStart := pi
+		for pi < pl && pattern[pi] != '/' {
+			pi++
+		}
+		pSeg := pattern[pStart:pi]
+
+		uStart := ppi
+		for ppi < ppl && path[ppi] != '/' {
+			ppi++
+		}
+		uSeg := path[uStart:ppi]
+
+		if len(pSeg) >= 3 && pSeg[0] == '{' && pSeg[len(pSeg)-1] == '}' {
+			params = append(params, Param{pSeg[1 : len(pSeg)-1], uSeg})
+		} else if pSeg != uSeg {
+			return nil, false
+		}
+	}
 }
 
 func existsInStatic(uri_path, asset_path, asset_dir string, embedFS fs.FS) bool {

@@ -58,10 +58,10 @@ server.Start(router)
 ## Benchmarks
 
 ```
-BenchmarkStaticRoute-8         3,582,957   340 ns/op   450 B/op   7 allocs/op
-BenchmarkPathParams-8          1,456,713   832 ns/op  1448 B/op  18 allocs/op
-BenchmarkBuild-8                     222  5.42 ms/op  4.59 MB/op  38k allocs/op
-BenchmarkConcurrentServe-8       705,944  1.69 μs/op 5.74 kB/op  20 allocs/op
+BenchmarkStaticRoute-8         10,124,955   127 ns/op   242 B/op   5 allocs/op
+BenchmarkPathParams-8           3,818,419   404 ns/op   776 B/op  12 allocs/op
+BenchmarkBuild-8                      222  5.71 ms/op  4.48 MB/op  40k allocs/op
+BenchmarkConcurrentServe-8        730,724  1.73 μs/op 5.35 kB/op  14 allocs/op
 ```
 
 [Full benchmark table →](configuration#benchmarks)
