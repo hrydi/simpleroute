@@ -34,21 +34,45 @@ type RouterConfig struct {
 }
 
 // Router defines HTTP method handlers for route registration.
+// Each method accepts args ...any which are identified by type:
+//   - http.Handler — the route handler
+//   - MiddlewareFunc — middleware wrapping the handler
+//   - []MiddlewareFunc — multiple middleware
+// They can appear in any order.
 type Router interface {
+	// Get registers a GET handler at the given path.
 	Get(path string, args ...any) Router
+	// Post registers a POST handler at the given path.
 	Post(path string, args ...any) Router
+	// Put registers a PUT handler at the given path.
 	Put(path string, args ...any) Router
+	// Patch registers a PATCH handler at the given path.
 	Patch(path string, args ...any) Router
+	// Delete registers a DELETE handler at the given path.
 	Delete(path string, args ...any) Router
+	// Head registers a HEAD handler at the given path.
 	Head(path string, args ...any) Router
+	// Mount attaches a sub-handler under the given path prefix for all HTTP methods.
 	Mount(path string, sub http.Handler) Router
+	// Logger returns the router's Logger instance.
 	Logger() Logger
 }
 
 // RouteRegister extends Router with group and middleware registration.
+// Use accepts any combination of:
+//   - HttpRouter — calls Routes(r) to register routes
+//   - string — HTTP method or URL pattern
+//   - http.Handler — the route handler
+//   - MiddlewareFunc — middleware wrapping the handler
+//   - []MiddlewareFunc — multiple middleware
 type RouteRegister interface {
 	Router
+	// Group creates a route group under path. args accepts:
+	//   - func(Router) Router — the group callback
+	//   - MiddlewareFunc, []MiddlewareFunc — group-level middleware
 	Group(path string, args ...any) Router
+	// Use registers middleware, handlers, or HttpRouter in a single call.
+	// Types are identified by type and can be mixed in any order.
 	Use(args ...any) RouteRegister
 }
 

@@ -8,6 +8,8 @@ nav_order: 2
 
 ## Method Routers
 
+`args ...any` accepts: `http.Handler`, `MiddlewareFunc`, `[]MiddlewareFunc` (in any order).
+
 | Method | Signature | Example |
 |--------|-----------|---------|
 | `Get` | `Get(path string, args ...any)` | `router.Get("/users", handler)` |
@@ -18,10 +20,12 @@ nav_order: 2
 | `Head` | `Head(path string, args ...any)` | `router.Head("/health", handler)` |
 | `Logger` | `Logger() Logger` | `router.Logger().Infof("...")` |
 
-Each method accepts optional middleware as trailing arguments:
+Pass the handler and optional middleware together — they are identified by type, so order does not matter:
 
 ```go
-router.Get("/admin", authMiddleware, adminHandler)
+router.Get("/admin", adminHandler, authMiddleware)
+router.Get("/admin", authMiddleware, adminHandler)   // same
+router.Get("/admin", adminHandler, mw1, mw2)         // multiple middleware
 ```
 
 ## Path Parameters
@@ -54,7 +58,9 @@ id := simpleroute.URLParam(r, "id")
 
 ## Route Groups
 
-Group routes under a common prefix with shared middleware:
+Group routes under a common prefix with shared middleware.
+
+`Group(path, callback, args...)` — `args` accepts: `func(Router) Router` (the callback), `MiddlewareFunc`, `[]MiddlewareFunc`.
 
 ```go
 router.Group("/api", func(router simpleroute.Router) simpleroute.Router {

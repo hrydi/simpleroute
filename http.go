@@ -17,6 +17,7 @@ type HttpServer interface {
 // HttpRouter is implemented by types that register routes onto a RouteRegister.
 // Use it to encapsulate route groups in separate types (see example/user.go).
 type HttpRouter interface {
+	// Routes registers routes onto the given RouteRegister.
 	Routes(r RouteRegister)
 }
 

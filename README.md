@@ -66,6 +66,8 @@ func main() {
 
 ### Router
 
+`args ...any` accepts: `http.Handler`, `MiddlewareFunc`, `[]MiddlewareFunc` (in any order).
+
 | Method | Description |
 |--------|-------------|
 | `Get(path, args...)` | Register GET handler |
@@ -78,11 +80,11 @@ func main() {
 
 ### RouteRegister
 
-| Method | Description |
-|--------|-------------|
-| `Group(path, callback, middlewares...)` | Namespaced route group |
-| `Use(args...)` | Register middleware, handlers, or HttpRouter |
-| `Mount(path, handler)` | Register subtree handler for all HTTP methods |
+| Method | Args types | Description |
+|--------|------------|-------------|
+| `Group(path, callback, args...)` | `func(Router) Router`, `MiddlewareFunc`, `[]MiddlewareFunc` | Namespaced route group |
+| `Use(args...)` | `HttpRouter`, `string` (method/pattern), `http.Handler`, `MiddlewareFunc`, `[]MiddlewareFunc` | Register middleware, handlers, or routes |
+| `Mount(path, handler)` | — | Register subtree handler for all HTTP methods |
 
 ### Middleware
 

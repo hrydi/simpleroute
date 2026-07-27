@@ -18,9 +18,13 @@ const (
 // Implementations should respect the receiver's own level filtering,
 // or use the LogLevel from RouterConfig for filtering.
 type Logger interface {
+	// Errorf logs a message at ERROR level.
 	Errorf(format string, args ...any)
+	// Warnf logs a message at WARN level.
 	Warnf(format string, args ...any)
+	// Infof logs a message at INFO level.
 	Infof(format string, args ...any)
+	// Debugf logs a message at DEBUG level.
 	Debugf(format string, args ...any)
 }
 

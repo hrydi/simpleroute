@@ -69,7 +69,7 @@ type HttpServer interface {
 
 ## Polymorphic Use
 
-`Use` accepts any combination of types in a single call:
+`Use(args ...any)` accepts the following types (mixed in any order):
 
 | Type | Behavior | Example |
 |------|----------|---------|
@@ -78,6 +78,8 @@ type HttpServer interface {
 | `http.Handler` | Final route handler | `myHandler` |
 | `MiddlewareFunc` | Middleware wrapping the handler | `authMiddleware` |
 | `[]MiddlewareFunc` | Batch middleware | `[]MiddlewareFunc{m1, m2}` |
+
+Route methods (`Get`, `Post`, etc.) accept a subset: `http.Handler`, `MiddlewareFunc`, `[]MiddlewareFunc`. See [Routing](routing.md) for details.
 
 Example — registers `GET /api` with the middleware chain:
 
