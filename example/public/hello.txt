@@ -1,0 +1,4 @@
+Hello from simpleroute's wildcard file route!
+
+This file is served by GET /files/hello.txt, matched by the
+route pattern GET /files/{path...}.

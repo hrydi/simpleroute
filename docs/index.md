@@ -3,6 +3,7 @@ title: simpleroute
 layout: default
 ---
 
+[![CI](https://github.com/hrydi/simpleroute/actions/workflows/ci.yml/badge.svg)](https://github.com/hrydi/simpleroute/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/hrydi/simpleroute)](https://pkg.go.dev/github.com/hrydi/simpleroute)
 [![Go Report Card](https://goreportcard.com/badge/github.com/hrydi/simpleroute)](https://goreportcard.com/report/github.com/hrydi/simpleroute)
 [![Go Version](https://img.shields.io/badge/go-1.24+-blue)](https://golang.org/dl/)

@@ -9,7 +9,18 @@ Lightweight Go HTTP router (`github.com/hrydi/simpleroute`). Go 1.24.4+ required
 - `make compose-run` — dev stack: mounts repo + starts Vite UI container.
 - `go build ./...` — compile everything.
 - `go vet ./...` — lint.
-- `go test ./...` — run all tests (grown well past the original 42 as features were added; see `simpleroute_test.go` and `simpleroute_benchmark_test.go`).
+- `go test ./...` — run all tests (grown well past the original 42 as features were added; see `simpleroute_test.go`, `http_test.go`, and `simpleroute_benchmark_test.go`).
+
+> `go build ./...` / `go vet ./...` / `go test ./...` only work after the Vue frontend is built, because `example/ui/ui.go` has `//go:embed vue/dist` and `vue/dist` is gitignored. Without that build, scope commands to the library: `go build . ./pkg/...`.
+
+## CI
+
+`.github/workflows/ci.yml` runs on push to `main`, on PRs, and manually:
+
+- **library** job (Go 1.24.x + stable): `go build`, `gofmt -l` gate, `go vet`, `go test` with coverage, `go test -race`. Scoped to `. ./pkg/...` for the embed reason above.
+- **example** job: builds the Vue frontend with Bun (`bun install --frozen-lockfile && bun run build`), then `go build ./...` and `go vet ./...` so the example is verified against the current library API.
+
+Keep `gofmt` clean — the library job fails the build on any unformatted file.
 
 ## Library entry points
 

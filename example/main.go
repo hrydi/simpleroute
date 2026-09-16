@@ -93,6 +93,7 @@ func main() {
 	}
 
 	router.Use(NewUser())
+	router.Use(NewFiles())
 
 	if err := router.Build(); err != nil {
 		log.Fatalf("router build error: %v", err)

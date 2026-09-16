@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  library:
+    name: Library (Go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.24.x', 'stable']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          # The library has no external dependencies (no go.sum), so there is
+          # nothing to cache.
+          cache: false
+
+      # ./... is avoided here on purpose: example/ui embeds vue/dist, which is
+      # gitignored and only exists after a frontend build. The example is
+      # covered by its own job below.
+      - name: Build
+        run: go build . ./pkg/...
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet . ./pkg/...
+
+      - name: Test
+        run: go test -coverprofile=coverage.out . ./pkg/...
+
+      - name: Test (race detector)
+        run: go test -race . ./pkg/...
+
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -1
+
+  example:
+    name: Example app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # example/ui/ui.go has //go:embed vue/dist, so the frontend must be built
+      # before the example will compile at all.
+      - name: Build frontend
+        working-directory: example/ui/vue
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
