@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"runtime"
 	"strings"
@@ -179,13 +180,32 @@ func Gzip(next http.Handler) http.Handler {
 type RateLimiterConfig struct {
 	RequestsPerSecond int
 	Burst             int
+	// KeyFunc extracts the rate-limit bucket key from a request, e.g. RemoteIP
+	// for per-client limiting. If nil, all requests share a single global
+	// bucket (pre-KeyFunc behavior).
+	KeyFunc func(*http.Request) string
+}
+
+// RemoteIP is a RateLimiterConfig.KeyFunc that keys by the request's remote
+// IP address, with the port stripped. Falls back to the raw RemoteAddr if it
+// cannot be parsed as host:port (e.g. in tests that set it directly).
+func RemoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+type rateBucket struct {
+	tokens     float64
+	lastRefill time.Time
 }
 
 // RateLimiter returns a middleware that limits request rates using a token
-// bucket algorithm. It returns 429 Too Many Requests when the limit is exceeded.
+// bucket algorithm, one bucket per KeyFunc(r) (or a single shared bucket if
+// KeyFunc is nil). It returns 429 Too Many Requests when a bucket is empty.
 func RateLimiter(config RateLimiterConfig) func(http.Handler) http.Handler {
-	var mu sync.Mutex
-	lastRefill := time.Now()
 	maxTokens := float64(config.Burst)
 	if maxTokens <= 0 {
 		maxTokens = float64(config.RequestsPerSecond)
@@ -193,26 +213,72 @@ func RateLimiter(config RateLimiterConfig) func(http.Handler) http.Handler {
 	if maxTokens <= 0 {
 		maxTokens = 1
 	}
-	tokens := maxTokens
 	rate := float64(config.RequestsPerSecond)
+
+	const idleTTL = 10 * time.Minute
+	const sweepEvery = 1024
+
+	var mu sync.Mutex
+	buckets := make(map[string]*rateBucket)
+	var calls uint64
+
+	take := func(key string) bool {
+		mu.Lock()
+		defer mu.Unlock()
+
+		now := time.Now()
+		b, ok := buckets[key]
+		if !ok {
+			b = &rateBucket{tokens: maxTokens, lastRefill: now}
+			buckets[key] = b
+		}
+
+		elapsed := now.Sub(b.lastRefill).Seconds()
+		b.tokens += elapsed * rate
+		if b.tokens > maxTokens {
+			b.tokens = maxTokens
+		}
+		b.lastRefill = now
+
+		calls++
+		if calls%sweepEvery == 0 {
+			for k, v := range buckets {
+				if now.Sub(v.lastRefill) > idleTTL {
+					delete(buckets, k)
+				}
+			}
+		}
+
+		if b.tokens < 1 {
+			return false
+		}
+		b.tokens--
+		return true
+	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			mu.Lock()
-			now := time.Now()
-			elapsed := now.Sub(lastRefill).Seconds()
-			tokens += elapsed * rate
-			if tokens > maxTokens {
-				tokens = maxTokens
+			key := ""
+			if config.KeyFunc != nil {
+				key = config.KeyFunc(r)
 			}
-			if tokens < 1 {
-				mu.Unlock()
+			if !take(key) {
 				http.Error(w, "too many requests", http.StatusTooManyRequests)
 				return
 			}
-			tokens--
-			lastRefill = now
-			mu.Unlock()
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// MaxBodyBytes returns a middleware that caps the request body at limit
+// bytes using http.MaxBytesReader. The limit is enforced lazily as the body
+// is read, so handlers (or BindJSON) must check the read/decode error and
+// respond with http.StatusRequestEntityTooLarge themselves.
+func MaxBodyBytes(limit int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -228,9 +294,9 @@ type MetricsRecorder struct {
 // Snapshot returns a point-in-time snapshot of the metrics.
 func (m *MetricsRecorder) Snapshot() map[string]any {
 	return map[string]any{
-		"total_requests":   m.TotalRequests.Load(),
-		"active_requests":  m.ActiveRequests.Load(),
-		"avg_duration_ns":  m.avgDuration(),
+		"total_requests":  m.TotalRequests.Load(),
+		"active_requests": m.ActiveRequests.Load(),
+		"avg_duration_ns": m.avgDuration(),
 	}
 }
 

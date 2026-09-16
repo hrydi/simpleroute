@@ -3,8 +3,10 @@ package simpleroute
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -253,6 +255,104 @@ func TestPathParamsMultiple(t *testing.T) {
 	}
 }
 
+func TestWildcardRoute(t *testing.T) {
+	t.Parallel()
+	r := NewRouter(RouterConfig{})
+	r.Get("/files/{path...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "path=%s", Params(r)["path"])
+	}))
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/files/a/b/c.txt", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "path=a/b/c.txt" {
+		t.Errorf("expected 'path=a/b/c.txt', got '%s'", rec.Body.String())
+	}
+}
+
+func TestWildcardRouteEmptyRemainder(t *testing.T) {
+	t.Parallel()
+	r := NewRouter(RouterConfig{})
+	r.Get("/files/{path...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "path=%q", Params(r)["path"])
+	}))
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/files/", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != `path=""` {
+		t.Errorf("expected empty path, got '%s'", rec.Body.String())
+	}
+}
+
+func TestWildcardRouteYieldsToMoreSpecificRoute(t *testing.T) {
+	t.Parallel()
+	r := NewRouter(RouterConfig{})
+	r.Get("/files/{path...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "wildcard")
+	}))
+	r.Get("/files/readme.txt", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "readme")
+	}))
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/files/readme.txt", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Body.String() != "readme" {
+		t.Errorf("expected 'readme' (specific route wins), got '%s'", rec.Body.String())
+	}
+
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest("GET", "/files/other.txt", nil)
+	r.ServeHTTP(rec2, req2)
+
+	if rec2.Body.String() != "wildcard" {
+		t.Errorf("expected 'wildcard' fallback, got '%s'", rec2.Body.String())
+	}
+}
+
+func TestWildcardRouteInGroup(t *testing.T) {
+	t.Parallel()
+	r := NewRouter(RouterConfig{})
+	r.Group("/api", func(router Router) Router {
+		return router.Get("/files/{path...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, "path=%s", Params(r)["path"])
+		}))
+	})
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/files/a/b", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "path=a/b" {
+		t.Errorf("expected 'path=a/b', got '%s'", rec.Body.String())
+	}
+}
+
 func TestParamsReturnsNil(t *testing.T) {
 	t.Parallel()
 	r := NewRouter(RouterConfig{})
@@ -316,6 +416,105 @@ func TestGroupMiddleware(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestNestedGroupRoutes(t *testing.T) {
+	t.Parallel()
+	r := NewRouter(RouterConfig{})
+	r.Group("/api", func(router Router) Router {
+		router.(RouteRegister).Group("/v1", func(inner Router) Router {
+			return inner.Get("/ping", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, "pong")
+			}))
+		})
+		return router
+	})
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/ping", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "pong" {
+		t.Errorf("expected 'pong', got '%s'", rec.Body.String())
+	}
+}
+
+func TestNestedGroupMiddlewareOrder(t *testing.T) {
+	t.Parallel()
+	var order []string
+	mu := &sync.Mutex{}
+	record := func(s string) { mu.Lock(); order = append(order, s); mu.Unlock() }
+	recorder := func(name string) MiddlewareFunc {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				record(name)
+				next.ServeHTTP(w, r)
+			})
+		}
+	}
+
+	r := NewRouter(RouterConfig{})
+	r.Use(recorder("root"))
+	r.Group("/g1", func(router Router) Router {
+		router.(RouteRegister).Group("/g2", func(inner Router) Router {
+			return inner.Get("/r", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				record("handler")
+				fmt.Fprint(w, "ok")
+			}), recorder("route"))
+		}, recorder("group2"))
+		return router
+	}, recorder("group1"))
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/g1/g2/r", nil)
+	r.ServeHTTP(rec, req)
+
+	expected := []string{"root", "group1", "group2", "route", "handler"}
+	if len(order) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, order)
+	}
+	for i, name := range expected {
+		if order[i] != name {
+			t.Errorf("expected order[%d] = %s, got %s", i, name, order[i])
+		}
+	}
+}
+
+func TestNestedGroupPathParams(t *testing.T) {
+	t.Parallel()
+	r := NewRouter(RouterConfig{})
+	r.Group("/api", func(router Router) Router {
+		router.(RouteRegister).Group("/users", func(inner Router) Router {
+			return inner.Get("/{id}/posts/{postId}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				params := Params(r)
+				fmt.Fprintf(w, "%s:%s", params["id"], params["postId"])
+			}))
+		})
+		return router
+	})
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/users/42/posts/7", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "42:7" {
+		t.Errorf("expected '42:7', got '%s'", rec.Body.String())
 	}
 }
 
@@ -818,6 +1017,176 @@ func TestJSONWriter(t *testing.T) {
 	}
 	if body["id"] != "abc" {
 		t.Errorf("expected 'abc', got '%s'", body["id"])
+	}
+}
+
+func TestBindJSON(t *testing.T) {
+	t.Parallel()
+	type payload struct {
+		Name string `json:"name"`
+	}
+	r := NewRouter(RouterConfig{})
+	r.Post("/echo", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p payload
+		if err := BindJSON(r, &p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		fmt.Fprint(w, p.Name)
+	}))
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/echo", strings.NewReader(`{"name":"gopher"}`))
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "gopher" {
+		t.Errorf("expected 'gopher', got '%s'", rec.Body.String())
+	}
+}
+
+func TestBindJSONInvalid(t *testing.T) {
+	t.Parallel()
+	type payload struct {
+		Name string `json:"name"`
+	}
+	r := NewRouter(RouterConfig{})
+	r.Post("/echo", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p payload
+		if err := BindJSON(r, &p); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		fmt.Fprint(w, p.Name)
+	}))
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/echo", strings.NewReader(`not json`))
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestMaxBodyBytes(t *testing.T) {
+	t.Parallel()
+	r := NewRouter(RouterConfig{})
+	r.Post("/upload", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		fmt.Fprintf(w, "got %d bytes", len(body))
+	}), MaxBodyBytes(5))
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/upload", strings.NewReader("this is way too long"))
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected 413, got %d", rec.Code)
+	}
+
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest("POST", "/upload", strings.NewReader("ok!!"))
+	r.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec2.Code)
+	}
+	if rec2.Body.String() != "got 4 bytes" {
+		t.Errorf("expected 'got 4 bytes', got '%s'", rec2.Body.String())
+	}
+}
+
+func TestRemoteIP(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "203.0.113.5:54321"
+	if ip := RemoteIP(req); ip != "203.0.113.5" {
+		t.Errorf("expected '203.0.113.5', got '%s'", ip)
+	}
+
+	req.RemoteAddr = "malformed-addr"
+	if ip := RemoteIP(req); ip != "malformed-addr" {
+		t.Errorf("expected fallback to raw RemoteAddr, got '%s'", ip)
+	}
+}
+
+func TestRateLimiterPerKeyIsolatesClients(t *testing.T) {
+	t.Parallel()
+	handler := RateLimiter(RateLimiterConfig{
+		RequestsPerSecond: 0,
+		Burst:             1,
+		KeyFunc: func(r *http.Request) string {
+			return r.Header.Get("X-Client")
+		},
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("X-Client", "a")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("client a request 1: expected 200, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("X-Client", "a")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("client a request 2: expected 429, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("X-Client", "b")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("client b request 1: expected 200 (separate bucket), got %d", rec.Code)
+	}
+}
+
+func TestRoutesDebugListing(t *testing.T) {
+	t.Parallel()
+	r := NewRouter(RouterConfig{})
+	r.Use(middleware("root"))
+	r.Get("/a", h)
+	r.Group("/g", func(router Router) Router {
+		return router.Post("/b", h, middleware("route"))
+	}, middleware("group"))
+
+	if got := r.Routes(); got != nil {
+		t.Errorf("expected nil before Build, got %v", got)
+	}
+
+	if err := r.Build(); err != nil {
+		t.Fatal(err)
+	}
+
+	routes := r.Routes()
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d: %+v", len(routes), routes)
+	}
+	if routes[0].Method != "GET" || routes[0].Pattern != "/a" || routes[0].Middlewares != 1 {
+		t.Errorf("unexpected route[0]: %+v", routes[0])
+	}
+	if routes[1].Method != "POST" || routes[1].Pattern != "/g/b" || routes[1].Middlewares != 3 {
+		t.Errorf("unexpected route[1]: %+v", routes[1])
 	}
 }
 

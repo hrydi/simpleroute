@@ -112,6 +112,14 @@ func JSON(w http.ResponseWriter, code int, data any) {
 	json.NewEncoder(w).Encode(data)
 }
 
+// BindJSON decodes the request body as JSON into dst. dst must be a pointer.
+// The caller is responsible for translating a non-nil error into an HTTP
+// response (e.g. http.StatusBadRequest, or http.StatusRequestEntityTooLarge
+// if the body was wrapped with MaxBodyBytes).
+func BindJSON(r *http.Request, dst any) error {
+	return json.NewDecoder(r.Body).Decode(dst)
+}
+
 // SetCtx stores a value in the request context and returns the modified request.
 // Chainable: r = SetCtx(SetCtx(r, "a", 1), "b", 2).
 func SetCtx(r *http.Request, key, value any) *http.Request {
@@ -129,5 +137,3 @@ func GetCtx[T any](r *http.Request, key any) (T, bool) {
 	val, ok := v.(T)
 	return val, ok
 }
-
-

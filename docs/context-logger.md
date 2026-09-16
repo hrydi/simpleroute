@@ -73,6 +73,8 @@ id := simpleroute.URLParam(r, "id")
 
 > `Params(r)` returns `nil` when no parameters are matched. `URLParam` returns an empty string.
 
+A trailing `{name...}` segment captures the rest of the path (slashes included) — see [Wildcard / Catch-all Parameters on the Routing page](routing).
+
 ## Logger
 
 ### Interface

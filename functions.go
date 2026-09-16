@@ -14,6 +14,18 @@ type Param struct {
 	Value string
 }
 
+// wildcardName reports whether seg is a trailing catch-all placeholder
+// ("{name...}") and, if so, returns its parameter name.
+func wildcardName(seg string) (string, bool) {
+	if len(seg) >= 3 && seg[0] == '{' && seg[len(seg)-1] == '}' {
+		name := seg[1 : len(seg)-1]
+		if strings.HasSuffix(name, "...") {
+			return strings.TrimSuffix(name, "..."), true
+		}
+	}
+	return "", false
+}
+
 func parseSegments(pattern string) []segment {
 	segs := make([]segment, 0, 4)
 	for i := 0; i < len(pattern); i++ {
@@ -25,7 +37,9 @@ func parseSegments(pattern string) []segment {
 			i++
 		}
 		s := pattern[start:i]
-		if len(s) >= 3 && s[0] == '{' && s[len(s)-1] == '}' {
+		if name, ok := wildcardName(s); ok {
+			segs = append(segs, segment{isWildcard: true, val: name})
+		} else if len(s) >= 3 && s[0] == '{' && s[len(s)-1] == '}' {
 			segs = append(segs, segment{isParam: true, val: s[1 : len(s)-1]})
 		} else {
 			segs = append(segs, segment{isParam: false, val: s})
@@ -34,6 +48,8 @@ func parseSegments(pattern string) []segment {
 	return segs
 }
 
+// matchRoute matches path against segs. A trailing wildcard segment
+// ({name...}) captures the remainder of the path, slashes included.
 func matchRoute(segs []segment, path string) ([]Param, bool) {
 	var params []Param
 	ppi := 0
@@ -43,6 +59,13 @@ func matchRoute(segs []segment, path string) ([]Param, bool) {
 		for ppi < ppl && path[ppi] == '/' {
 			ppi++
 		}
+
+		if segs[si].isWildcard {
+			rest := strings.TrimRight(path[ppi:], "/")
+			params = append(params, Param{segs[si].val, rest})
+			return params, true
+		}
+
 		if ppi >= ppl {
 			return nil, false
 		}
@@ -101,7 +124,7 @@ func matchPath(pattern, path string) ([]Param, bool) {
 		if pi >= pl && ppi >= ppl {
 			return params, true
 		}
-		if pi >= pl || ppi >= ppl {
+		if pi >= pl {
 			return nil, false
 		}
 
@@ -110,6 +133,16 @@ func matchPath(pattern, path string) ([]Param, bool) {
 			pi++
 		}
 		pSeg := pattern[pStart:pi]
+
+		if name, ok := wildcardName(pSeg); ok {
+			rest := strings.TrimRight(path[ppi:], "/")
+			params = append(params, Param{name, rest})
+			return params, true
+		}
+
+		if ppi >= ppl {
+			return nil, false
+		}
 
 		uStart := ppi
 		for ppi < ppl && path[ppi] != '/' {

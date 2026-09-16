@@ -11,16 +11,18 @@ Lightweight, zero-dependency HTTP router for Go 1.24+.
 
 - **Zero external dependencies** — pure stdlib
 - **Path parameters** — `{param}` patterns injected into request context
-- **Group routing** — namespaced routes with shared middleware
+- **Wildcard/catch-all parameters** — `{param...}` captures the remainder of the path, slashes included
+- **Group routing** — namespaced routes with shared middleware, nestable to any depth
 - **Middleware chain** — global, group, and route-level middleware
 - **Polymorphic `Use`** — accepts `HttpRouter`, `http.Handler`, `MiddlewareFunc`, method/pattern strings
 - **Static file serving** — supports both `embed.FS` and `os.DirFS`
-- **Built-in middleware** — CORS, panic recovery, request logging, request ID, gzip, rate limiter, metrics, context injection
+- **Built-in middleware** — CORS, panic recovery, request logging, request ID, gzip, rate limiter (global or per-key), body size limit, metrics, context injection
 - **HEAD auto-routing** — HEAD requests fall back to GET handlers, body stripped automatically
 - **Custom 404/405 handlers** — plug your own handlers via `RouterConfig`
 - **Subtree mount** — `router.Mount("/prefix", subHandler)` for all methods
 - **Query helpers** — `Query`, `QueryInt`, `QueryFloat`, `QueryBool` with defaults
-- **Response helpers** — `JSON`, `WriteError`, `Text`
+- **Response helpers** — `JSON`, `BindJSON`, `WriteError`, `Text`
+- **Route introspection** — `router.Routes()` lists every registered route for debugging/startup logging
 - **Concurrent-safe** — `sync.Once` build, no per-request locks, per-router logger
 - **Production-ready server** — configurable timeouts (10s read, 10s write, 60s idle by default)
 
@@ -97,7 +99,8 @@ func main() {
 | `WithContext(key, val)(handler)` | Injects value into request context |
 | `RequestID(handler)` | Injects/preserves `X-Request-ID` header + context |
 | `Gzip(handler)` | Transparent gzip compression |
-| `RateLimiter(config)` | Token bucket rate limiter (returns 429) |
+| `RateLimiter(config)` | Token bucket rate limiter (returns 429). Global bucket by default, or per-key via `RateLimiterConfig.KeyFunc` (e.g. `RemoteIP`) |
+| `MaxBodyBytes(limit)(handler)` | Caps the request body at `limit` bytes via `http.MaxBytesReader`; handlers must check the read/decode error |
 | `Metrics(recorder)` | Atomic counters for total/active requests and cumulative duration |
 
 ### Utilities
@@ -107,6 +110,7 @@ func main() {
 | `Params(r) map[string]string` | Extract path parameters from context as a map |
 | `URLParam(r, key) string` | Extract a single path parameter by name (zero-alloc) |
 | `JSON(w, code, data)` | Write JSON response with content-type |
+| `BindJSON(r, &dst) error` | Decode the request body as JSON into `dst` |
 | `WriteError(w, code, msg)` | Write plain-text error response |
 | `Text(w, code, msg)` | Write plain-text response |
 | `Handle(middlewares, handler)` | Build middleware chain |
@@ -116,6 +120,7 @@ func main() {
 | `QueryInt(r, key, default)` | Get query parameter as int |
 | `QueryFloat(r, key, default)` | Get query parameter as float64 |
 | `QueryBool(r, key, default)` | Get query parameter as bool |
+| `router.Routes() []RouteInfo` | List every registered route (method, pattern, middleware count); valid after `Build()` |
 
 
 ### Server
@@ -224,6 +229,19 @@ router.Get("/user/{id}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Re
 }))
 ```
 
+Use `{name...}` as the last segment to capture the rest of the path (slashes included) — handy for file servers or proxies:
+
+```go
+router.Get("/files/{path...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    path := simpleroute.URLParam(r, "path")
+    fmt.Fprintf(w, "serving: %s", path)
+}))
+
+// GET /files/a/b/c.txt -> path = "a/b/c.txt"
+```
+
+A more specific route registered alongside a wildcard still wins for matching requests.
+
 ## Route Groups
 
 Group routes under a common prefix with optional shared middleware:
@@ -236,6 +254,21 @@ router.Group("/api", func(router simpleroute.Router) simpleroute.Router {
         Post("/users", createUser)
 }, authMiddleware, loggerMiddleware)
 ```
+
+Groups nest to any depth. The callback receives a `Router` (no `Group`/`Use` method), so cast to `RouteRegister` to nest:
+
+```go
+router.Group("/api", func(router simpleroute.Router) simpleroute.Router {
+    router.(simpleroute.RouteRegister).Group("/v1", func(v1 simpleroute.Router) simpleroute.Router {
+        return v1.Get("/users", listUsers)
+    }, v1OnlyMiddleware)
+    return router
+}, apiMiddleware)
+
+// GET /api/v1/users runs: apiMiddleware -> v1OnlyMiddleware -> listUsers
+```
+
+Path prefixes concatenate (`/api` + `/v1` + `/users`) and middleware chains outward-in (root → each group, outermost first → route).
 
 ## Middleware Order
 
@@ -277,13 +310,59 @@ router.Use("/api", apiHandler, simpleroute.CORS(simpleroute.CORSConfig{
 
 ## Rate Limiter
 
-Token bucket rate limiter:
+Token bucket rate limiter. By default all requests share a single global bucket:
 
 ```go
 router.Use("/api", simpleroute.RateLimiter(simpleroute.RateLimiterConfig{
     RequestsPerSecond: 10,
     Burst:             20,
 }))
+```
+
+Pass `KeyFunc` for per-client limiting — one bucket per key, with idle buckets evicted automatically:
+
+```go
+router.Use("/api", simpleroute.RateLimiter(simpleroute.RateLimiterConfig{
+    RequestsPerSecond: 10,
+    Burst:             20,
+    KeyFunc:           simpleroute.RemoteIP, // or e.g. func(r *http.Request) string { return r.Header.Get("X-API-Key") }
+}))
+```
+
+## Request Body Binding & Limits
+
+Decode a JSON body:
+
+```go
+router.Post("/users", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    var in CreateUserRequest
+    if err := simpleroute.BindJSON(r, &in); err != nil {
+        simpleroute.WriteError(w, http.StatusBadRequest, "invalid body")
+        return
+    }
+    // ...
+}))
+```
+
+Cap the request body size — combine with `BindJSON` for safe JSON APIs:
+
+```go
+router.Post("/upload", uploadHandler, simpleroute.MaxBodyBytes(1<<20)) // 1MB
+```
+
+`MaxBodyBytes` wraps `r.Body` with `http.MaxBytesReader`; the limit is enforced when the body is read, so the handler (or `BindJSON`) must check the error and respond with `http.StatusRequestEntityTooLarge` itself.
+
+## Route Introspection
+
+List every registered route after `Build()` — useful for logging all endpoints at startup:
+
+```go
+if err := router.Build(); err != nil {
+    log.Fatal(err)
+}
+for _, rt := range router.Routes() {
+    fmt.Printf("%-6s %s (%d middleware)\n", rt.Method, rt.Pattern, rt.Middlewares)
+}
 ```
 
 ## Metrics

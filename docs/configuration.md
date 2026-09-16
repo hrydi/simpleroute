@@ -95,6 +95,27 @@ router.Use(
 
 > Multiple `string` arguments: the first uppercase string is treated as the HTTP method, the rest as the path.
 
+## Route Introspection
+
+`router.Routes() []RouteInfo` lists every registered route (method, pattern, and resolved middleware count) after `Build()` — `nil` before. Useful for logging all endpoints at startup:
+
+```go
+type RouteInfo struct {
+    Method      string
+    Pattern     string
+    Middlewares int
+}
+```
+
+```go
+if err := router.Build(); err != nil {
+    log.Fatal(err)
+}
+for _, rt := range router.Routes() {
+    fmt.Printf("%-6s %s (%d middleware)\n", rt.Method, rt.Pattern, rt.Middlewares)
+}
+```
+
 ---
 
 ## Benchmarks

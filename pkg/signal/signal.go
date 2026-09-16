@@ -11,7 +11,7 @@ const (
 	sigChSize = 32
 )
 
-func HandleSignals(sigs ...os.Signal) <- chan os.Signal {
+func HandleSignals(sigs ...os.Signal) <-chan os.Signal {
 	ch := make(chan os.Signal, sigChSize)
 	go func() {
 		sigCh := make(chan os.Signal, sigChSize)
@@ -28,7 +28,7 @@ func HandleSignals(sigs ...os.Signal) <- chan os.Signal {
 
 func CreateContext(ch <-chan os.Signal) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
-	go func ()  {
+	go func() {
 		<-ch
 		cancel()
 	}()

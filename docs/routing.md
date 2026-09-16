@@ -56,6 +56,22 @@ id := simpleroute.URLParam(r, "id")
 
 > `Params(r)` returns `nil` when no parameters are matched. `URLParam` returns an empty string.
 
+## Wildcard / Catch-all Parameters
+
+Use `{name...}` as the **last** segment of a pattern to capture the rest of the path, slashes included:
+
+```go
+router.Get("/files/{path...}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    path := simpleroute.URLParam(r, "path")
+    fmt.Fprintf(w, "serving: %s", path)
+}))
+
+// GET /files/a/b/c.txt -> path = "a/b/c.txt"
+// GET /files/           -> path = ""
+```
+
+A more specific route registered alongside a wildcard still wins for matching requests — `/files/readme.txt` is served by an explicit `Get("/files/readme.txt", ...)` handler even when `Get("/files/{path...}", ...)` is also registered; only unmatched paths fall through to the wildcard.
+
 ## Route Groups
 
 Group routes under a common prefix with shared middleware.
@@ -72,6 +88,22 @@ router.Group("/api", func(router simpleroute.Router) simpleroute.Router {
 ```
 
 The callback receives a `Router` (no `Use` method). Group middleware is passed as extra arguments after the callback. The `Router.Logger()` method is available inside the callback for logging.
+
+### Nested Groups
+
+Groups nest to any depth. Since the callback only gets a `Router`, cast it to `RouteRegister` to call `Group` again:
+
+```go
+router.Group("/api", func(router simpleroute.Router) simpleroute.Router {
+    router.(simpleroute.RouteRegister).Group("/v1", func(v1 simpleroute.Router) simpleroute.Router {
+        return v1.Get("/users", listUsers)
+    }, v1OnlyMiddleware)
+    return router
+}, apiMiddleware)
+
+// GET /api/v1/users -> path prefixes concatenate: /api + /v1 + /users
+// middleware chains outward-in: apiMiddleware -> v1OnlyMiddleware -> listUsers
+```
 
 ## Subtree Mount
 

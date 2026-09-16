@@ -23,13 +23,13 @@ var METHODS = []string{
 
 // RouterConfig configures a new router instance.
 type RouterConfig struct {
-	AssetDir               string
-	AssetPath              string
-	FS                     fs.FS
-	Logger                 Logger
-	LogLevel               LogLevel
-	BaseContext            context.Context
-	NotFoundHandler        http.Handler
+	AssetDir                string
+	AssetPath               string
+	FS                      fs.FS
+	Logger                  Logger
+	LogLevel                LogLevel
+	BaseContext             context.Context
+	NotFoundHandler         http.Handler
 	MethodNotAllowedHandler http.Handler
 }
 
@@ -38,6 +38,7 @@ type RouterConfig struct {
 //   - http.Handler — the route handler
 //   - MiddlewareFunc — middleware wrapping the handler
 //   - []MiddlewareFunc — multiple middleware
+//
 // They can appear in any order.
 type Router interface {
 	// Get registers a GET handler at the given path.
@@ -89,8 +90,9 @@ type ContextKey string
 const ParamsContextKey ContextKey = "route_params"
 
 type segment struct {
-	isParam bool
-	val     string
+	isParam    bool
+	isWildcard bool
+	val        string
 }
 
 type route struct {
@@ -113,9 +115,9 @@ type routerImpl struct {
 	allowMethods  map[string][]string
 	mux           *http.ServeMux
 
-	once      sync.Once
-	built     bool
-	buildErr  error
+	once     sync.Once
+	built    bool
+	buildErr error
 }
 
 func (r *routerImpl) Get(path string, args ...any) Router {
@@ -181,6 +183,7 @@ func (r *routerImpl) Group(path string, args ...any) Router {
 	router := &routerImpl{
 		group:       path,
 		routes:      make(map[string][]route),
+		groups:      make(map[string]Router),
 		middlewares: middlewares,
 		config:      r.config,
 		log:         r.log,
@@ -429,6 +432,39 @@ func (r *routerImpl) Build() error {
 	return r.buildErr
 }
 
+// RouteInfo describes a single registered route, as returned by Routes().
+// It is a diagnostic snapshot (e.g. for logging all endpoints at startup),
+// not part of the request-handling path.
+type RouteInfo struct {
+	Method      string
+	Pattern     string
+	Middlewares int
+}
+
+// Routes returns diagnostic info for every route registered so far, sorted
+// by pattern then method. Only meaningful after Build() — returns nil if
+// the router has not been built yet.
+func (r *routerImpl) Routes() []RouteInfo {
+	if !r.built {
+		return nil
+	}
+	infos := make([]RouteInfo, 0, len(r.routeHandlers))
+	for _, rt := range r.routeHandlers {
+		infos = append(infos, RouteInfo{
+			Method:      rt.method,
+			Pattern:     rt.pattern,
+			Middlewares: len(rt.middlewares),
+		})
+	}
+	slices.SortFunc(infos, func(a, b RouteInfo) int {
+		if a.Pattern != b.Pattern {
+			return strings.Compare(a.Pattern, b.Pattern)
+		}
+		return strings.Compare(a.Method, b.Method)
+	})
+	return infos
+}
+
 func (r *routerImpl) setupRoutes() (*http.ServeMux, []route, error) {
 	mux := http.NewServeMux()
 
@@ -464,25 +500,9 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route, error) {
 			continue
 		}
 
-		for _, routes := range g.routes {
-			for _, rt := range routes {
-				pattern := rt.pattern
-				if g.group != "" {
-					if pattern == "/" {
-						pattern = ""
-					}
-					pattern = g.group + pattern
-				}
-
-				mws := chainMiddleware(r.middlewares, g.middlewares, rt.middlewares)
-				grt := route{
-					method:  rt.method,
-					pattern: pattern,
-					handler: rt.handler,
-				}
-				if err := r.registerRoute(mux, seen, &allRoutes, grt, mws); err != nil {
-					return nil, nil, err
-				}
+		for _, gr := range r.collectGroupRoutes(g, "", r.middlewares) {
+			if err := r.registerRoute(mux, seen, &allRoutes, gr.rt, gr.middlewares); err != nil {
+				return nil, nil, err
 			}
 		}
 	}
@@ -497,6 +517,51 @@ func (r *routerImpl) setupRoutes() (*http.ServeMux, []route, error) {
 	r.allowMethods = allow
 
 	return mux, allRoutes, nil
+}
+
+// groupRoute pairs a fully-prefixed route with its resolved middleware chain,
+// as produced by collectGroupRoutes.
+type groupRoute struct {
+	rt          route
+	middlewares []MiddlewareFunc
+}
+
+// collectGroupRoutes recursively walks g and its nested groups, prefixing
+// each route's pattern with the accumulated group path and chaining each
+// group's middlewares (outermost first) onto inherited.
+func (r *routerImpl) collectGroupRoutes(g *routerImpl, prefix string, inherited []MiddlewareFunc) []groupRoute {
+	groupPrefix := prefix + g.group
+	mws := chainMiddleware(inherited, g.middlewares)
+
+	var out []groupRoute
+	for _, routes := range g.routes {
+		for _, rt := range routes {
+			pattern := rt.pattern
+			if groupPrefix != "" {
+				if pattern == "/" {
+					pattern = ""
+				}
+				pattern = groupPrefix + pattern
+			}
+
+			grt := route{
+				method:  rt.method,
+				pattern: pattern,
+				handler: rt.handler,
+			}
+			out = append(out, groupRoute{rt: grt, middlewares: chainMiddleware(mws, rt.middlewares)})
+		}
+	}
+
+	for _, sub := range g.groups {
+		sg, ok := sub.(*routerImpl)
+		if !ok {
+			continue
+		}
+		out = append(out, r.collectGroupRoutes(sg, groupPrefix, mws)...)
+	}
+
+	return out
 }
 
 func (r *routerImpl) registerRoute(mux *http.ServeMux, seen map[string]bool, allRoutes *[]route, rt route, middlewares []MiddlewareFunc) error {

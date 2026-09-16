@@ -99,7 +99,7 @@ router.Use(simpleroute.Gzip)
 
 ### RateLimiter
 
-Token bucket rate limiter. Returns `429 Too Many Requests` when the limit is exceeded:
+Token bucket rate limiter. Returns `429 Too Many Requests` when the limit is exceeded. By default every request shares one global bucket:
 
 ```go
 router.Use("/api", simpleroute.RateLimiter(simpleroute.RateLimiterConfig{
@@ -107,6 +107,28 @@ router.Use("/api", simpleroute.RateLimiter(simpleroute.RateLimiterConfig{
     Burst:             20,
 }))
 ```
+
+Set `KeyFunc` to give each client its own bucket instead — buckets are created lazily per key and idle ones (no traffic for 10 minutes) are swept periodically so memory stays bounded:
+
+```go
+router.Use("/api", simpleroute.RateLimiter(simpleroute.RateLimiterConfig{
+    RequestsPerSecond: 10,
+    Burst:             20,
+    KeyFunc:           simpleroute.RemoteIP,
+}))
+```
+
+`RemoteIP` extracts `r.RemoteAddr` with the port stripped; supply your own `func(*http.Request) string` to key by an API key, auth subject, etc.
+
+### MaxBodyBytes
+
+Caps the request body at a fixed size using `http.MaxBytesReader`:
+
+```go
+router.Post("/upload", uploadHandler, simpleroute.MaxBodyBytes(1<<20)) // 1MB
+```
+
+The limit is enforced lazily as the body is read — the handler (or `BindJSON`) must check the read/decode error and respond with `http.StatusRequestEntityTooLarge` itself; the middleware does not intercept the response.
 
 ### Metrics
 

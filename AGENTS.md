@@ -9,7 +9,7 @@ Lightweight Go HTTP router (`github.com/hrydi/simpleroute`). Go 1.24.4+ required
 - `make compose-run` — dev stack: mounts repo + starts Vite UI container.
 - `go build ./...` — compile everything.
 - `go vet ./...` — lint.
-- `go test ./...` — run all tests (42 tests + 12 benchmarks in `simpleroute_test.go` and `simpleroute_benchmark_test.go`).
+- `go test ./...` — run all tests (grown well past the original 42 as features were added; see `simpleroute_test.go` and `simpleroute_benchmark_test.go`).
 
 ## Library entry points
 
@@ -25,7 +25,9 @@ Lightweight Go HTTP router (`github.com/hrydi/simpleroute`). Go 1.24.4+ required
 - `HttpRouter` interface (`Routes(r RouteRegister)`) is the pattern for grouping route registration (see `example/user.go`).
 - Middleware order: global router middlewares run first, then route middlewares, then the handler. `Handle` wraps in reverse so the first middleware is outermost.
 - Path parameters (`{param}` in patterns) are injected into request context. Use `simpleroute.Params(r *http.Request) map[string]string` to retrieve them.
-- Group middleware is passed as extra args to `Group(path, callback, middleware1, middleware2, ...)`. The callback receives `Router` (no `Use` method).
+- Wildcard/catch-all: `{name...}` as the final pattern segment captures the rest of the path (slashes included), e.g. `/files/{path...}`. Matched in `matchPath`/`matchRoute` (functions.go) via the shared `wildcardName` helper; a more specific route still wins over a wildcard for the same request.
+- Group middleware is passed as extra args to `Group(path, callback, middleware1, middleware2, ...)`. The callback receives `Router` (no `Use`/`Group` method) — cast to `RouteRegister` to nest groups (`router.(RouteRegister).Group(...)`), which is now supported recursively.
+- `router.Routes() []RouteInfo` (concrete method on `*routerImpl`, not part of the `Router`/`RouteRegister` interfaces — same convention as `Build()`) lists every registered route (method, pattern, middleware count), sorted by pattern then method. Returns `nil` before `Build()`.
 
 ## Built-in middleware
 
@@ -34,6 +36,9 @@ Lightweight Go HTTP router (`github.com/hrydi/simpleroute`). Go 1.24.4+ required
 - `ContentTypeJson` — sets `Content-Type: application/json`.
 - `RequestLogger` — logs method, path, and duration.
 - `WithContext(name, value)` — injects a value into the request context.
+- `RateLimiter(config)` — token bucket rate limiter; global single bucket by default, or per-key (one bucket per `config.KeyFunc(r)`, e.g. `RemoteIP`) with idle buckets (>10min, checked every 1024 calls) swept to bound memory.
+- `MaxBodyBytes(limit)` — wraps `r.Body` with `http.MaxBytesReader`; enforcement happens lazily on read, so handlers/`BindJSON` must check the error and return 413 themselves.
+- `BindJSON(r, &dst) error` (http.go) — JSON-decodes the request body; pairs with `MaxBodyBytes` for safe request binding.
 
 ## Dev vs production
 

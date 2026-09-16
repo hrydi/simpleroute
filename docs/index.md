@@ -43,14 +43,17 @@ server.Start(router)
 
 - **Zero external dependencies** — pure stdlib
 - **Path parameters** — `{param}` patterns injected into request context
-- **Group routing** — namespaced routes with shared middleware
+- **Wildcard/catch-all parameters** — `{param...}` captures the remainder of the path, slashes included
+- **Group routing** — namespaced routes with shared middleware, nestable to any depth
 - **Middleware chain** — global, group, and route-level
 - **Polymorphic `Use`** — accepts `HttpRouter`, `http.Handler`, `MiddlewareFunc`, method/pattern strings
-- **Built-in middleware** — CORS, panic recovery, request logging, request ID, gzip, rate limiter, metrics
+- **Built-in middleware** — CORS, panic recovery, request logging, request ID, gzip, rate limiter (global or per-key), body size limit, metrics
+- **Request binding** — `BindJSON` decodes JSON bodies; pairs with `MaxBodyBytes`
+- **Route introspection** — `router.Routes()` lists every registered route for startup logging/debugging
 - **HEAD auto-routing** — HEAD → GET fallback with body stripping
 - **Custom 404/405 handlers** — plug your own
 - **Subtree mount** — all-methods handler registration
-- **Concurrent-safe** — `sync.Once` build, `sync.RWMutex` logger, no per-request locks
+- **Concurrent-safe** — `sync.Once` build, no per-request locks, per-router logger
 - **Production-ready server** — configurable timeouts (10s read / 10s write / 60s idle)
 
 ---
